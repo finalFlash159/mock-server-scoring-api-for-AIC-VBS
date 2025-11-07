@@ -331,11 +331,11 @@ async def submit(request: Request):
         # Normalize submission
         try:
             if gt.type == "KIS":
-                normalized = normalize_kis(answer_sets, gt.video_id, question_id)
+                normalized = normalize_kis(body, question_id)
             elif gt.type == "QA":
-                normalized = normalize_qa(answer_sets, gt.video_id, question_id)
+                normalized = normalize_qa(body, question_id)
             elif gt.type == "TR":
-                normalized = normalize_tr(answer_sets, gt.video_id, question_id)
+                normalized = normalize_tr(body, question_id)
             else:
                 raise HTTPException(status_code=400, detail=f"Unknown task type: {gt.type}")
         except ValueError as e:

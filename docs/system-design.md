@@ -1,49 +1,67 @@
-# System Design - AIC 2025 Scoring Server
+# System Design - AIC 2025 Scoring Server (Competition Mode)
 
 ## Architecture Overview
 
 ```mermaid
 graph TB
-    Client[Client Team] -->|HTTP POST| API[FastAPI Server]
-    API -->|Load Config| Config[current_task.yaml]
+    Admin[Admin] -->|Start/Stop| API[FastAPI Server]
+    Team[Team] -->|Submit| API
+    API -->|Manage| Session[Session Manager]
     API -->|Load GT| CSV[groundtruth.csv]
     API -->|Normalize| Normalizer[Normalizer]
     Normalizer -->|KIS/QA/TR| Submission[NormalizedSubmission]
-    Submission -->|Score| Scorer[Scoring Engine]
+    Submission -->|Score| Scorer[Competition Scorer]
+    Session -->|Timing Data| Scorer
     CSV -->|Ground Truth| Scorer
-    Config -->|Parameters| Scorer
+    Config[current_task.yaml] -->|Parameters| Scorer
     Scorer -->|Results| Response[JSON Response]
-    Response -->|HTTP 200| Client
+    Response -->|HTTP 200| Team
+    Session -->|Rankings| Leaderboard[Leaderboard]
     
     style API fill:#4CAF50
+    style Session fill:#9C27B0
     style Scorer fill:#FF9800
     style Response fill:#2196F3
 ```
+
+**Key Changes in Competition Mode:**
+- Server-controlled timing (admin starts/stops questions)
+- Session management tracks teams and submissions
+- Penalty system for wrong submissions
+- Time-based scoring with exact match
+- Real-time leaderboard
 
 ## Component Architecture
 
 ### 1. FastAPI Server (`app/main.py`)
 
-Main application server with 4 endpoints:
+Main application server with admin and public endpoints:
 
 ```mermaid
-graph LR
-    A[FastAPI App] --> B[GET /]
-    A --> C[GET /config]
-    A --> D[GET /questions]
-    A --> E[POST /submit]
+graph TB
+    A[FastAPI App] --> B[Admin Endpoints]
+    A --> C[Public Endpoints]
     
-    B --> F[Health Check]
-    C --> G[Current Config]
-    D --> H[List Questions]
-    E --> I[Score Submission]
+    B --> B1[POST /admin/start-question]
+    B --> B2[POST /admin/stop-question]
+    B --> B3[POST /admin/reset-all]
+    B --> B4[GET /admin/sessions]
+    
+    C --> C1[GET /]
+    C --> C2[GET /config]
+    C --> C3[GET /question/:id/status]
+    C --> C4[GET /leaderboard]
+    C --> C5[POST /submit]
 ```
 
 **Responsibilities:**
 - Handle HTTP requests/responses
 - CORS middleware for development
 - Load groundtruth on startup
-- Route requests to appropriate handlers
+- Manage question sessions
+- Track team submissions
+- Calculate scores with time and penalties
+- Generate leaderboard
 
 ### 2. Data Models (`app/models.py`)
 
@@ -64,35 +82,96 @@ classDiagram
         +List~int~ values
     }
     
-    class Config {
-        +int active_question_id
-        +float fps
-        +float max_score
-        +float frame_tolerance
-        +float decay_per_frame
-        +str aggregation
+    class QuestionSession {
+        +int question_id
+        +float start_time
+        +int time_limit
+        +int buffer_time
+        +bool is_active
+        +Dict team_submissions
     }
+    
+    class TeamSubmission {
+        +str team_id
+        +int wrong_count
+        +List submit_times
+        +bool is_completed
+        +float first_correct_time
+        +float final_score
+    }
+    
+    class ScoringParams {
+        +int p_max
+        +int p_base
+        +int p_penalty
+        +int time_limit
+        +int buffer_time
+    }
+    
+    QuestionSession --> TeamSubmission
 ```
 
 **GroundTruth:**
 - Represents one question from CSV
-- `points`: Even-length list, each pair = 1 event
+- `points`: Even-length list, each pair = 1 event (dash-separated)
 
 **NormalizedSubmission:**
 - Unified format after normalization
 - `values`: User submitted values (ms or frame_id)
 
-**Config:**
-- Scoring parameters
-- `aggregation`: "mean" | "min" | "sum"
+**QuestionSession:**
+- Server-controlled question timing
+- Tracks all team submissions for the question
+- Manages active/inactive state
 
-### 3. Groundtruth Loader (`app/groundtruth_loader.py`)
+**TeamSubmission:**
+- Per-team tracking within a question
+- Records wrong attempts and timing
+- Stores final score after completion
+
+**ScoringParams:**
+- Competition scoring parameters
+- p_max=100, p_base=50, p_penalty=10
+- time_limit=300s, buffer_time=10s
+
+### 3. Session Manager (`app/session.py`)
+
+Server-controlled question timing and team tracking:
+
+```mermaid
+flowchart TD
+    A[Admin Starts Question] --> B[Create QuestionSession]
+    B --> C[Record start_time]
+    C --> D[Set time_limit + buffer]
+    D --> E[Session Active]
+    E --> F{Team Submits}
+    F --> G{First Submission?}
+    G -->|Yes| H[Create TeamSubmission]
+    G -->|No| I[Get Existing]
+    H --> J{Correct?}
+    I --> J
+    J -->|No| K[Increment wrong_count]
+    J -->|Yes| L[Record first_correct_time]
+    L --> M[Calculate Score]
+    M --> N[Mark Completed]
+    K --> O[Return Score 0]
+```
+
+**Key Functions:**
+- `start_question()`: Admin starts timer
+- `stop_question()`: Admin stops manually
+- `is_question_active()`: Check if within time limit + buffer
+- `get_elapsed_time()`: Time since start
+- `record_submission()`: Track team attempts
+- `get_question_leaderboard()`: Generate rankings
+
+### 4. Groundtruth Loader (`app/groundtruth_loader.py`)
 
 ```mermaid
 flowchart TD
     A[Load CSV] --> B{Validate Format}
     B -->|Invalid| C[Raise Error]
-    B -->|Valid| D[Parse Points]
+    B -->|Valid| D[Parse Points with Dash]
     D --> E{Even Count?}
     E -->|No| C
     E -->|Yes| F{Sorted?}
@@ -103,53 +182,87 @@ flowchart TD
 ```
 
 **Validations:**
+- Points are dash-separated (`-`)
 - Points count must be even
 - Points must be sorted ascending
 - All required fields present
 
-### 4. Normalizer (`app/normalizer.py`)
+### 5. Normalizer (`app/normalizer.py`)
 
 Converts different body formats to unified `NormalizedSubmission`:
 
 ```mermaid
 flowchart LR
-    A[Request Body] --> B{Task Type?}
+    A[Request Body + team_id] --> B{Task Type?}
     B -->|KIS| C[normalize_kis]
     B -->|QA| D[normalize_qa]
     B -->|TR| E[normalize_tr]
     C --> F[NormalizedSubmission]
     D --> F
     E --> F
-    F --> G[Scoring Engine]
+    F --> G[Competition Scorer]
 ```
 
 **KIS Format:**
 - Multiple `answers` with `mediaItemName`, `start`, `end`
-- Each answer = 1 event
+- Each answer represents one timestamp
+- Must match all groundtruth timestamps exactly
 
 **QA Format:**
 - Single `text` with pattern: `QA-<ANSWER>-<VIDEO_ID>-<MS1>,<MS2>,...`
-- Comma-separated times in one text
+- Comma-separated milliseconds in one text
+- Must match all groundtruth timestamps exactly
 
 **TR Format:**
 - Single `text` with pattern: `TR-<VIDEO_ID>-<FRAME_ID1>,<FRAME_ID2>,...`
 - Comma-separated frame IDs in one text
+- Supports partial matching (50-99% = half score)
 
-### 5. Scoring Engine (`app/scoring.py`)
+### 6. Competition Scorer (`app/scoring.py`)
+
+**Complete Rewrite for Competition Mode:**
 
 ```mermaid
 flowchart TD
-    A[Start Scoring] --> B[Parse GT Points to Events]
-    B --> C[Loop Each Event]
-    C --> D{User Has Value?}
-    D -->|No| E[Score = 0]
-    D -->|Yes| F{Task Type?}
-    F -->|KIS/QA| G[score_event_ms]
-    F -->|TR| H[score_event_frame]
-    G --> I[Event Score]
-    H --> I
-    E --> I
-    I --> J{More Events?}
+    A[Start Scoring] --> B[Parse GT Events]
+    B --> C[Check Exact Match]
+    C --> D{All Matched?}
+    D -->|Yes| E[Calculate Correctness Factor]
+    D -->|No| E
+    E --> F{Task Type?}
+    F -->|KIS/QA| G{100% Match?}
+    F -->|TR| H{Match Percentage?}
+    G -->|Yes| I[correctness = 1.0]
+    G -->|No| J[correctness = 0.0]
+    H -->|100%| I
+    H -->|50-99%| K[correctness = 0.5]
+    H -->|<50%| J
+    I --> L[Calculate Time Factor]
+    J --> M[Return Score 0]
+    K --> L
+    L --> N[fT = 1 - t/T]
+    N --> O[Apply Formula]
+    O --> P[Score = max 0, P_base + P_max-P_base × fT - k × P_penalty × correctness]
+    P --> Q[Return Final Score]
+```
+
+**Key Functions:**
+
+1. **`calculate_time_factor(t_submit, t_task)`**
+   - Formula: `fT(t) = 1 - (t_submit / T_task)`
+   - Earlier = higher multiplier
+
+2. **`check_exact_match(user_values, gt_events, task_type)`**
+   - No tolerance - must match exactly
+   - Returns (matched_count, total_events)
+
+3. **`calculate_correctness_factor(matched, total, task_type)`**
+   - KIS/QA: 100% or nothing
+   - TR: 100%=1.0, 50-99%=0.5, <50%=0.0
+
+4. **`calculate_final_score(params, t_submit, k, correctness)`**
+   - Full competition formula
+   - Returns max(0, score)
     J -->|Yes| C
     J -->|No| K[Aggregate Scores]
     K --> L{Aggregation?}
