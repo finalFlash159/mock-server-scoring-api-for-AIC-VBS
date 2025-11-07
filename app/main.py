@@ -1,16 +1,24 @@
 """
 FastAPI main application
-AIC 2025 - Scoring Server for Multiple Events
+AIC 2025 - Scoring Server for Multiple Events with Competition Mode
 """
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from typing import Optional
 import logging
 
-from app.config import load_config
+from app.config import load_config, update_active_question
 from app.groundtruth_loader import load_groundtruth
 from app.normalizer import normalize_kis, normalize_qa, normalize_tr
 from app.scoring import score_submission
+from app.models import ScoringParams
+from app.session import (
+    start_question, stop_question, get_question_session,
+    is_question_active, get_elapsed_time, get_remaining_time,
+    get_team_submission, record_submission, get_question_leaderboard,
+    get_all_sessions_status, reset_all_questions
+)
 
 # Setup logging
 logging.basicConfig(
@@ -64,9 +72,148 @@ async def root():
     """Health check endpoint"""
     return {
         "status": "ok",
-        "message": "AIC 2025 Scoring Server",
-        "version": "1.0.0",
+        "message": "AIC 2025 Scoring Server - Competition Mode",
+        "version": "2.0.0",
         "total_questions": len(GT_TABLE) if GT_TABLE else 0
+    }
+
+
+# ==================== ADMIN ENDPOINTS ====================
+
+@app.post("/admin/start-question")
+async def admin_start_question(request: dict):
+    """
+    Admin: Start a question with timer
+    
+    Request:
+        {
+            "question_id": 1,
+            "time_limit": 300,  # optional, default 300
+            "buffer_time": 10   # optional, default 10
+        }
+    """
+    question_id = request.get("question_id")
+    time_limit = request.get("time_limit", 300)
+    buffer_time = request.get("buffer_time", 10)
+    
+    if not question_id:
+        raise HTTPException(status_code=400, detail="question_id required")
+    
+    # Check if question exists
+    if question_id not in GT_TABLE:
+        raise HTTPException(status_code=404, detail=f"Question {question_id} not found in groundtruth")
+    
+    # Start question session
+    session = start_question(question_id, time_limit, buffer_time)
+    
+    # Update config
+    update_active_question(question_id)
+    
+    return {
+        "success": True,
+        "question_id": question_id,
+        "start_time": session.start_time,
+        "time_limit": time_limit,
+        "buffer_time": buffer_time,
+        "message": f"Question {question_id} started. Teams can now submit."
+    }
+
+
+@app.post("/admin/stop-question")
+async def admin_stop_question(request: dict):
+    """
+    Admin: Stop a question immediately
+    
+    Request:
+        {"question_id": 1}
+    """
+    question_id = request.get("question_id")
+    
+    if not question_id:
+        raise HTTPException(status_code=400, detail="question_id required")
+    
+    session = get_question_session(question_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Question {question_id} not active")
+    
+    stop_question(question_id)
+    
+    completed = sum(1 for ts in session.team_submissions.values() if ts.is_completed)
+    total_subs = sum(len(ts.submit_times) for ts in session.team_submissions.values())
+    
+    return {
+        "success": True,
+        "question_id": question_id,
+        "total_submissions": total_subs,
+        "completed_teams": completed,
+        "message": f"Question {question_id} stopped."
+    }
+
+
+@app.post("/admin/reset-all")
+async def admin_reset_all():
+    """Admin: Reset all sessions (DANGEROUS - testing only)"""
+    count = reset_all_questions()
+    return {
+        "success": True,
+        "deleted_sessions": count,
+        "message": f"All sessions cleared. Deleted {count} questions."
+    }
+
+
+@app.get("/admin/sessions")
+async def admin_list_sessions():
+    """Admin: List all active sessions"""
+    status = get_all_sessions_status()
+    return {
+        "total": len(status),
+        "sessions": status
+    }
+
+
+# ==================== PUBLIC ENDPOINTS ====================
+
+@app.get("/question/{question_id}/status")
+async def get_question_status(question_id: int):
+    """
+    Public: Get question status
+    
+    Response includes timing info and participation stats
+    """
+    session = get_question_session(question_id)
+    
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Question {question_id} not started")
+    
+    return {
+        "question_id": question_id,
+        "is_active": is_question_active(question_id),
+        "elapsed_time": round(get_elapsed_time(question_id), 2),
+        "remaining_time": round(get_remaining_time(question_id), 2),
+        "time_limit": session.time_limit,
+        "buffer_time": session.buffer_time,
+        "total_teams_submitted": len(session.team_submissions),
+        "completed_teams": sum(1 for ts in session.team_submissions.values() if ts.is_completed)
+    }
+
+
+@app.get("/leaderboard")
+async def get_leaderboard(question_id: Optional[int] = None):
+    """
+    Get leaderboard
+    
+    Query params:
+        question_id: Specific question (required for now)
+    """
+    if not question_id:
+        raise HTTPException(status_code=400, detail="question_id required")
+    
+    rankings = get_question_leaderboard(question_id)
+    
+    return {
+        "question_id": question_id,
+        "total_ranked": len(rankings),
+        "rankings": rankings
     }
 
 
@@ -105,111 +252,164 @@ async def get_config():
 @app.post("/submit")
 async def submit(request: Request):
     """
-    Submit answer for scoring
+    Submit answer (Competition Mode - No session_id needed)
     
-    Request body format depends on task type:
+    Request:
+        {
+            "team_id": "team_01",
+            "question_id": 1,  # optional, uses active if not specified
+            "answerSets": [...]
+        }
     
-    KIS:
-    {
-        "answerSets": [{
-            "answers": [
-                {"mediaItemName": "V017", "start": "4999", "end": "4999"},
-                {"mediaItemName": "V017", "start": "5049", "end": "5049"}
-            ]
-        }]
-    }
+    Response (CORRECT):
+        {
+            "success": true,
+            "correctness": "full|partial",
+            "score": 85.5,
+            "detail": {...}
+        }
     
-    QA:
-    {
-        "answerSets": [{
-            "answers": [
-                {"text": "QA-ANSWER1-V017-4999"},
-                {"text": "QA-ANSWER2-V017-5049"}
-            ]
-        }]
-    }
-    
-    TR:
-    {
-        "answerSets": [{
-            "answers": [
-                {"text": "TR-V017-499"},
-                {"text": "TR-V017-549"}
-            ]
-        }]
-    }
+    Response (INCORRECT):
+        {
+            "success": false,
+            "correctness": "incorrect",
+            "score": 0,
+            "detail": {...}
+        }
     """
     try:
         # Parse request body
         body = await request.json()
+        team_id = body.get("team_id")
+        question_id = body.get("question_id")
+        answer_sets = body.get("answerSets")
         
-        # Load current config
-        cfg = load_config("config/current_task.yaml")
-        qid = cfg.active_question_id
+        if not team_id:
+            raise HTTPException(status_code=400, detail="team_id required")
         
-        # Check if question exists
-        if qid not in GT_TABLE:
+        if not answer_sets:
+            raise HTTPException(status_code=400, detail="answerSets required")
+        
+        # Get active question if not specified
+        if not question_id:
+            cfg = load_config()
+            question_id = cfg.active_question_id
+        
+        # Check if question is active (includes buffer time check)
+        if not is_question_active(question_id):
+            elapsed = get_elapsed_time(question_id)
+            session = get_question_session(question_id)
             raise HTTPException(
-                status_code=400, 
-                detail=f"Active question {qid} not found in ground truth"
+                status_code=400,
+                detail={
+                    "error": "time_limit_exceeded",
+                    "elapsed_time": round(elapsed, 2),
+                    "time_limit": session.time_limit if session else 300,
+                    "buffer_time": session.buffer_time if session else 10,
+                    "message": "Time limit exceeded (including buffer)"
+                }
             )
         
-        gt = GT_TABLE[qid]
+        # Check if team already completed this question
+        team_sub = get_team_submission(question_id, team_id)
+        if team_sub and team_sub.is_completed:
+            return {
+                "success": False,
+                "error": "already_completed",
+                "detail": {
+                    "score": team_sub.final_score,
+                    "completed_at": round(team_sub.first_correct_time - get_question_session(question_id).start_time, 2)
+                },
+                "message": f"You already completed this question with score {team_sub.final_score}"
+            }
         
-        # Normalize submission based on task type
+        # Get ground truth
+        gt = GT_TABLE.get(question_id)
+        if not gt:
+            raise HTTPException(status_code=404, detail=f"Question {question_id} not found")
+        
+        # Normalize submission
         try:
             if gt.type == "KIS":
-                sub = normalize_kis(body, qid)
+                normalized = normalize_kis(answer_sets, gt.video_id, question_id)
             elif gt.type == "QA":
-                sub = normalize_qa(body, qid)
-            elif gt.type in ("TR", "TRAKE"):
-                sub = normalize_tr(body, qid)
+                normalized = normalize_qa(answer_sets, gt.video_id, question_id)
+            elif gt.type == "TR":
+                normalized = normalize_tr(answer_sets, gt.video_id, question_id)
             else:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Unsupported task type: {gt.type}"
-                )
+                raise HTTPException(status_code=400, detail=f"Unknown task type: {gt.type}")
         except ValueError as e:
             raise HTTPException(status_code=400, detail=f"Invalid submission format: {str(e)}")
         
-        # Validate video_id matches
-        if sub.video_id != gt.video_id:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Video ID mismatch: submitted {sub.video_id}, expected {gt.video_id}"
-            )
+        # Get elapsed time and wrong count
+        elapsed_time = get_elapsed_time(question_id)
+        k = team_sub.wrong_count if team_sub else 0
         
-        # Score the submission
-        final_score, detail = score_submission(sub, gt, cfg)
-        
-        # Log submission
-        logger.info(
-            f"Q{qid} ({gt.type}) | Video: {sub.video_id} | "
-            f"Events: {len(sub.values)}/{len(gt.points)//2} | "
-            f"Score: {final_score:.2f}"
+        # Load scoring params
+        cfg = load_config()
+        params = ScoringParams(
+            p_max=cfg.p_max,
+            p_base=cfg.p_base,
+            p_penalty=cfg.p_penalty,
+            time_limit=cfg.time_limit,
+            buffer_time=cfg.buffer_time
         )
         
-        # Return result
-        return {
-            "success": True,
-            "question_id": qid,
-            "type": gt.type,
-            "video_id": sub.video_id,
-            "score": round(final_score, 2),
-            "detail": {
-                "per_event_scores": [round(s, 2) for s in detail["per_event_scores"]],
-                "gt_events": detail["gt_events"],
-                "user_values": detail["user_values"],
-                "aggregation_method": detail["aggregation_method"],
-                "num_gt_events": detail["num_gt_events"],
-                "num_user_events": detail["num_user_events"]
+        # Score submission
+        result = score_submission(normalized, gt, elapsed_time, k, params)
+        
+        # Determine if correct
+        is_correct = result["correctness_factor"] > 0
+        
+        # Record submission
+        record_submission(question_id, team_id, is_correct, result["score"] if is_correct else None)
+        
+        # Build response
+        if is_correct:
+            correctness = "full" if result["correctness_factor"] == 1.0 else "partial"
+            logger.info(
+                f"✅ Team {team_id} | Q{question_id} ({gt.type}) | "
+                f"Score: {result['score']:.2f} | Time: {elapsed_time:.2f}s | Wrong: {k}"
+            )
+            return {
+                "success": True,
+                "correctness": correctness,
+                "score": result["score"],
+                "detail": {
+                    "matched_events": result["matched_events"],
+                    "total_events": result["total_events"],
+                    "percentage": result["percentage"],
+                    "elapsed_time": round(elapsed_time, 2),
+                    "time_factor": result["time_factor"],
+                    "penalty": result["penalty"],
+                    "wrong_count": k
+                },
+                "message": f"Correct! Final score: {result['score']}"
             }
-        }
+        else:
+            logger.info(
+                f"❌ Team {team_id} | Q{question_id} ({gt.type}) | "
+                f"Incorrect | Matched: {result['matched_events']}/{result['total_events']} | Wrong: {k+1}"
+            )
+            return {
+                "success": False,
+                "correctness": "incorrect",
+                "score": 0,
+                "detail": {
+                    "matched_events": result["matched_events"],
+                    "total_events": result["total_events"],
+                    "percentage": result["percentage"],
+                    "elapsed_time": round(elapsed_time, 2),
+                    "remaining_time": round(get_remaining_time(question_id), 2),
+                    "wrong_count": k + 1
+                },
+                "message": "Incorrect. Try again!"
+            }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error: {e}", exc_info=True)
+        logger.error(f"Unexpected error in submit: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
