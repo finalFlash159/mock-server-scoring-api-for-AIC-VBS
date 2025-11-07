@@ -189,6 +189,3 @@ Detailed documentation about system design, scoring logic, and architecture:
 pytest tests/test_scoring.py -v
 ```
 
----
-
-**AIC 2025 Team** | Made with love for VBS Competition
