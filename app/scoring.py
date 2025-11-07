@@ -181,6 +181,13 @@ def score_submission(
     Returns:
         Scoring result dictionary
     """
+    # Validate scene_id and video_id match
+    if submission.scene_id != ground_truth.scene_id:
+        raise ValueError(f"Scene ID mismatch: submitted '{submission.scene_id}' vs expected '{ground_truth.scene_id}'")
+    
+    if submission.video_id != ground_truth.video_id:
+        raise ValueError(f"Video ID mismatch: submitted '{submission.video_id}' vs expected '{ground_truth.video_id}'")
+    
     # Parse GT events from points
     gt_events = points_to_events(ground_truth.points)
     

@@ -18,6 +18,7 @@ class NormalizedSubmission(BaseModel):
     """Normalized submission from client"""
     question_id: int
     qtype: str  # "KIS" | "QA" | "TR"
+    scene_id: str
     video_id: str
     values: List[int]  # KIS/QA: ms, TR: frame_id
 

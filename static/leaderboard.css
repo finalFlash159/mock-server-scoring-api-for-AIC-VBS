@@ -137,99 +137,110 @@ header h1 {
 /* ===== REAL-TIME VIEW (GRID LAYOUT) ===== */
 .grid-container {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 15px;
-    padding: 20px 0;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 0; /* NO GAP - cards stick together */
+    padding: 0;
 }
 
-/* Team Card */
+/* Team Card - New Design */
 .team-card {
-    background: var(--bg-card);
-    border: 3px solid var(--border-color);
-    border-radius: 12px;
-    padding: 20px;
+    background: var(--bg-primary);
+    border: none; /* NO BORDER */
+    border-radius: 0; /* NO BORDER RADIUS */
+    padding: 0; /* NO PADDING */
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    transition: all 0.3s ease;
     min-height: 180px;
     position: relative;
     overflow: hidden;
+    transition: transform 0.2s ease;
 }
 
 .team-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 10px 30px rgba(255, 255, 255, 0.1);
+    transform: scale(1.02);
+    z-index: 10;
 }
 
-/* Real team special styling */
-.team-card.real-team {
-    border-color: var(--color-correct);
-    border-width: 4px;
-    background: var(--bg-card);
-    box-shadow: 0 0 20px rgba(0, 255, 0, 0.3);
-}
-
-.team-card.real-team::before {
-    content: "⭐";
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    font-size: 1.5rem;
-    animation: glow 2s infinite;
-}
-
-@keyframes glow {
-    0%, 100% { opacity: 1; filter: drop-shadow(0 0 5px var(--color-correct)); }
-    50% { opacity: 0.7; filter: drop-shadow(0 0 10px var(--color-correct)); }
-}
-
-/* Card content */
-.team-card .team-name {
-    font-size: 1.2rem;
-    font-weight: 700;
-    margin-bottom: 12px;
-    color: var(--text-primary);
-}
-
-.team-card.real-team .team-name {
-    color: var(--text-primary);
-    text-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
-}
-
-.team-card .submission-icons {
-    font-size: 1.8rem;
-    margin: 10px 0;
-    min-height: 40px;
+/* Top section (2/3 height) - Black background, white text */
+.team-info {
+    background: var(--bg-primary);
+    height: 66.67%; /* 2/3 of card height */
     display: flex;
-    gap: 5px;
-    align-items: center;
+    flex-direction: column;
     justify-content: center;
+    align-items: center;
+    padding: 15px 10px;
+    text-align: center;
+}
+
+.team-card .team-name {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 8px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
 }
 
 .team-card .score {
-    font-size: 2.5rem;
+    font-size: 2rem;
     font-weight: 900;
-    margin-top: 10px;
+    color: var(--text-primary);
 }
 
-/* Score color coding on cards - Only Red or Green */
-.team-card.score-high { border-color: var(--color-correct); }
-.team-card.score-high .score { color: var(--color-correct); }
+/* Bottom section (1/3 height) - Split green/red */
+.team-stats {
+    height: 33.33%; /* 1/3 of card height */
+    display: flex;
+}
 
-.team-card.score-good { border-color: var(--color-correct); }
-.team-card.score-good .score { color: var(--color-correct); }
+/* Left half - GREEN for correct submissions */
+.stat-correct {
+    flex: 1;
+    background: var(--color-correct);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+    font-weight: 900;
+    color: var(--text-primary);
+}
 
-.team-card.score-medium { border-color: var(--color-wrong); }
-.team-card.score-medium .score { color: var(--color-wrong); }
+/* Right half - RED for wrong submissions */
+.stat-wrong {
+    flex: 1;
+    background: var(--color-wrong);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+    font-weight: 900;
+    color: var(--text-primary);
+}
 
-.team-card.score-low { border-color: var(--color-wrong); }
-.team-card.score-low .score { color: var(--color-wrong); }
+/* Real team special styling */
+.team-card.real-team .team-info {
+    background: var(--bg-secondary);
+}
 
-.team-card.score-none { border-color: var(--color-neutral); opacity: 0.6; }
-.team-card.score-none .score { color: var(--color-neutral); }
+.team-card.real-team .team-name::before {
+    content: "⭐ ";
+}
+
+/* Remove old card styling */
+.team-card.score-high,
+.team-card.score-good,
+.team-card.score-medium,
+.team-card.score-low,
+.team-card.score-none {
+    border: none;
+}
+
+.team-card .submission-icons {
+    display: none; /* Remove old icons display */
+}
 
 /* Loading state */
 .loading-card {

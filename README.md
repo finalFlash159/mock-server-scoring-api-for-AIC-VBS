@@ -131,8 +131,8 @@ curl http://localhost:8000/config
 - 📊 **All Questions:** Complete competition overview
 - 🏆 **Rankings:** Sorted by total score
 - ✅ **Submission Icons:** Green ✓ for correct, red ✗ for wrong
-- � **Question Breakdown:** Individual scores for each question
-- 🤖 **15 Fake Teams:** Realistic competition simulation
+- 📈 **Question Breakdown:** Individual scores for each question
+- 🤖 **20 Real Teams:** All AIC 2025 competitors (UIT@Dzeus, TKU.TonNGoYsss, UTE AI LAB, etc.)
 
 **Table Layout:**
 ```
@@ -303,25 +303,32 @@ curl http://localhost:8000/leaderboard?question_id=1
 
 ## API Request Format
 
-**All submissions require `team_id`** for tracking. Question timing is controlled by admin.
+**Server auto-handles `team_id` and `question_id`**:
+- ✅ `team_id`: Automatically mapped to "0THING2LOSE" (your team)
+- ✅ `question_id`: Automatically uses the active question started by admin
+- ⚠️ Only submit when admin has started a question!
+
+**You only need to send `answerSets`** - the actual answer data.
+
+**IMPORTANT**: All submissions must include **SCENE_ID** and **VIDEO_ID** in format: `<SCENE_ID>_<VIDEO_ID>`
 
 ### KIS (Known-Item Search)
 
 Each event = separate answer. Must match **ALL** groundtruth events exactly (100% or 0 score).
 
+**Format**: `mediaItemName` = `<SCENE_ID>_<VIDEO_ID>`
+
 ```json
 {
-  "team_id": "team_01",
-  "question_id": 1,
   "answerSets": [{
     "answers": [
       {
-        "mediaItemName": "V017",
+        "mediaItemName": "L26_V017",
         "start": "4945",
         "end": "4945"
       },
       {
-        "mediaItemName": "V017",
+        "mediaItemName": "L26_V017",
         "start": "5010",
         "end": "5010"
       }
@@ -334,19 +341,17 @@ Each event = separate answer. Must match **ALL** groundtruth events exactly (100
 
 All times in **one text**, comma-separated. Must match **ALL** groundtruth events exactly (100% or 0 score).
 
+**Format:** `QA-<ANSWER>-<SCENE_ID>_<VIDEO_ID>-<MS1>,<MS2>,...`
+
 ```json
 {
-  "team_id": "team_01",
-  "question_id": 3,
   "answerSets": [{
     "answers": [
-      { "text": "QA-MyAnswer-V021-12000,12345" }
+      { "text": "QA-MyAnswer-K17_V003-357500,362500" }
     ]
   }]
 }
 ```
-
-**Format:** `QA-<ANSWER>-<VIDEO_ID>-<MS1>,<MS2>,...`
 
 ### TR (Temporal Retrieval / TRAKE)
 
@@ -355,29 +360,49 @@ All frame IDs in **one text**, comma-separated. Supports **partial scoring**:
 - **50-99% match:** Half score (correctness = 0.5)
 - **<50% match:** Zero score (correctness = 0.0)
 
+**Format:** `TR-<SCENE_ID>_<VIDEO_ID>-<FRAME_ID1>,<FRAME_ID2>,...`
+
 ```json
 {
-  "team_id": "team_01",
-  "question_id": 1,
   "answerSets": [{
     "answers": [
-      { "text": "TR-V017-4890,5000,5001,5020" }
+      { "text": "TR-K02_V005-9925,9975,10000,10050,10125,10175" }
     ]
   }]
 }
 ```
 
-**Format:** `TR-<VIDEO_ID>-<FRAME_ID1>,<FRAME_ID2>,...`
-
 ### Submit via API
 
 ```bash
+# KIS example
 curl -X POST http://localhost:8000/submit \
   -H "Content-Type: application/json" \
   -d '{
-    "team_id": "your_team_id",
-    "question_id": 1,
-    "answerSets": [...]
+    "answerSets": [{
+      "answers": [
+        {"mediaItemName": "L26_V017", "start": "4945", "end": "4945"},
+        {"mediaItemName": "L26_V017", "start": "5010", "end": "5010"}
+      ]
+    }]
+  }'
+
+# QA example
+curl -X POST http://localhost:8000/submit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "answerSets": [{
+      "answers": [{"text": "QA-MyAnswer-K17_V003-357500,362500"}]
+    }]
+  }'
+
+# TR example
+curl -X POST http://localhost:8000/submit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "answerSets": [{
+      "answers": [{"text": "TR-K02_V005-9925,9975,10000,10050"}]
+    }]
   }'
 ```
 

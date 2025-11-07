@@ -127,26 +127,27 @@ function renderRealtimeView(data) {
 function createTeamCard(team, questionId, isReal) {
     const questionData = team.questions[questionId];
     
-    if (!questionData) {
-        // No data for this question
-        return `
-            <div class="team-card score-none ${isReal ? 'real-team' : ''}">
-                <div class="team-name">${team.team_name}</div>
-                <div class="submission-icons">-</div>
-                <div class="score">-</div>
-            </div>
-        `;
+    // Default values
+    let score = 0;
+    let correctCount = 0;
+    let wrongCount = 0;
+    
+    if (questionData) {
+        score = questionData.score || 0;
+        correctCount = questionData.correct_count || 0;
+        wrongCount = questionData.wrong_count || 0;
     }
     
-    const { score, correct_count, wrong_count } = questionData;
-    const scoreClass = getScoreClass(score);
-    const icons = renderIcons(correct_count, wrong_count);
-    
     return `
-        <div class="team-card ${scoreClass} ${isReal ? 'real-team' : ''}">
-            <div class="team-name">${team.team_name}</div>
-            <div class="submission-icons">${icons}</div>
-            <div class="score">${score.toFixed(1)}</div>
+        <div class="team-card ${isReal ? 'real-team' : ''}">
+            <div class="team-info">
+                <div class="team-name">${team.team_name}</div>
+                <div class="score">${score.toFixed(1)}</div>
+            </div>
+            <div class="team-stats">
+                <div class="stat-correct">${correctCount}</div>
+                <div class="stat-wrong">${wrongCount}</div>
+            </div>
         </div>
     `;
 }

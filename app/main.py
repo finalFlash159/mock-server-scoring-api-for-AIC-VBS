@@ -297,24 +297,23 @@ async def submit(request: Request):
     try:
         # Parse request body
         body = await request.json()
-        team_id = body.get("team_id")
-        question_id = body.get("question_id")
         answer_sets = body.get("answerSets")
-        
-        if not team_id:
-            raise HTTPException(status_code=400, detail="team_id required")
-        
-        # FORCE MAP ALL SUBMISSIONS TO "0THING2LOSE"
-        original_team_id = team_id
-        team_id = "0THING2LOSE"
         
         if not answer_sets:
             raise HTTPException(status_code=400, detail="answerSets required")
         
-        # Get active question if not specified
+        # SERVER AUTO-HANDLES: team_id always mapped to "0THING2LOSE"
+        team_id = "0THING2LOSE"
+        
+        # SERVER AUTO-HANDLES: question_id from active question
+        cfg = load_config()
+        question_id = cfg.active_question_id
+        
         if not question_id:
-            cfg = load_config()
-            question_id = cfg.active_question_id
+            raise HTTPException(
+                status_code=400, 
+                detail="No active question. Admin must start a question first."
+            )
         
         # Check if question is active (includes buffer time check)
         if not is_question_active(question_id):

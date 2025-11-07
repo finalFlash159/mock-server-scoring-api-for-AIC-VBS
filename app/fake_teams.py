@@ -4,35 +4,33 @@ Fake teams generator for leaderboard simulation
 import random
 from typing import List, Tuple
 
-# Pool of creative team names
+# Pool of real AIC 2025 team names
 TEAM_NAMES = [
-    "CodeNinja", "ByteBusters", "AlgoMasters", "DataDragons",
-    "PixelPirates", "QueryQueens", "FrameFinders", "ScriptSquad",
-    "BinaryBandits", "LogicLords", "CacheCrusaders", "DebugDynasty",
-    "RegexRebels", "StackSmashers", "HeapHeroes", "ArrayAces",
-    "LinkedLegends", "TreeTraversers", "GraphGurus", "HashHustlers",
-    "QueueKings", "RecursionRiders", "BitBrigade", "LoopLegends",
-    "FunctionFury", "PointerPros", "MemoryMasters", "CompilerCrew"
+    "UIT@Dzeus", "TKU.TonNGoYsss", "UTE AI LAB", "UIT-SHAMROCK",
+    "TKU@MBZUAI", "TKU@UNIVORN&WHEAT", "Althena", "Your answer",
+    "float97", "KPT", "GALAXY-AI", "Lucifer",
+    "FLameReavers", "OpenCubee_1", "OpenCubee2", "Nomial",
+    "AIO - Neural Weavers", "5bros", "AeThanhHoa", "AIO_Trinh"
 ]
 
 
-def generate_fake_team_names(count: int = 15) -> List[str]:
+def generate_fake_team_names(count: int = 20) -> List[str]:
     """
     Generate unique team names excluding 0THING2LOSE
     
     Args:
-        count: Number of fake teams to generate
+        count: Number of fake teams to generate (default 20 - all AIC 2025 teams)
         
     Returns:
         List of unique team names
     """
     available = [name for name in TEAM_NAMES if name != "0THING2LOSE"]
     
-    # Add more random names if needed
-    while len(available) < count:
-        available.append(f"Team{random.randint(100, 999)}")
+    # Use all available teams, or sample if count is less
+    if count >= len(available):
+        return available
     
-    return random.sample(available, min(count, len(available)))
+    return random.sample(available, count)
 
 
 def generate_weighted_score() -> float:

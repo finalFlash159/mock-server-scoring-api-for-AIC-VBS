@@ -30,7 +30,7 @@ def initialize_fake_teams(question_id: int, time_limit: int) -> Dict[str, TeamSu
     )
     
     fake_teams = {}
-    team_names = generate_fake_team_names(15)  # Generate 15 fake teams
+    team_names = generate_fake_team_names(20)  # Generate 20 fake teams (all AIC 2025 competitors)
     current_time = time.time()
     
     for name in team_names:
