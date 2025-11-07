@@ -104,8 +104,10 @@ function updateQuestionInfo() {
 async function startQuestion() {
     const questionId = parseInt(document.getElementById('question-id').value);
     
-    if (!questionId || questionId < 1 || questionId > 5) {
-        log('Invalid question ID (must be 1-5)', 'error');
+    // Validate question ID exists in loaded config
+    if (!questionId || !questionConfig[questionId]) {
+        const maxQ = Math.max(...Object.keys(questionConfig).map(Number));
+        log(`Invalid question ID. Available: 1-${maxQ}`, 'error');
         return;
     }
     
@@ -161,8 +163,10 @@ function startQuestionQuick(questionId) {
 async function stopQuestion() {
     const questionId = parseInt(document.getElementById('stop-question-id').value);
     
-    if (!questionId || questionId < 1 || questionId > 5) {
-        log('Invalid question ID (must be 1-5)', 'error');
+    // Validate question ID exists in loaded config
+    if (!questionId || !questionConfig[questionId]) {
+        const maxQ = Math.max(...Object.keys(questionConfig).map(Number));
+        log(`Invalid question ID. Available: 1-${maxQ}`, 'error');
         return;
     }
     

@@ -60,9 +60,10 @@ def normalize_kis(body: Dict, question_id: int) -> NormalizedSubmission:
             video_id = parts[1]
         
         # Use start time as the submission value (ms)
-        start = answer.get("start", "").strip()
+        start = answer.get("start", "")
         if start:
-            values.append(int(start))
+            # Handle both string and int types
+            values.append(int(start) if isinstance(start, int) else int(str(start).strip()))
     
     if not scene_id or not video_id:
         raise ValueError("No valid mediaItemName (SCENE_ID_VIDEO_ID) found in KIS answers")

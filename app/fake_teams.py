@@ -38,23 +38,23 @@ def generate_weighted_score() -> float:
     Generate random score with weighted distribution
     
     Score distribution:
-    - 80-100: 15% (high scores - rare)
-    - 60-80: 30% (good scores)
-    - 40-60: 35% (medium scores)
-    - 0-40: 20% (low scores)
+    - 80-100: 5% (high scores - very rare)
+    - 60-80: 20% (good scores)
+    - 40-60: 40% (medium scores)
+    - 0-40: 35% (low scores)
     
     Returns:
         Score between 0 and 100
     """
     rand = random.random()
     
-    if rand < 0.15:  # 15% - High scores
+    if rand < 0.05:  # 5% - High scores (reduced from 15%)
         return round(random.uniform(80, 100), 1)
-    elif rand < 0.45:  # 30% - Good scores
+    elif rand < 0.25:  # 20% - Good scores (reduced from 30%)
         return round(random.uniform(60, 80), 1)
-    elif rand < 0.80:  # 35% - Medium scores
+    elif rand < 0.65:  # 40% - Medium scores (increased from 35%)
         return round(random.uniform(40, 60), 1)
-    else:  # 20% - Low scores
+    else:  # 35% - Low scores (increased from 20%)
         return round(random.uniform(0, 40), 1)
 
 

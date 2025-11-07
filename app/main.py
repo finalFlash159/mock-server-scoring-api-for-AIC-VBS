@@ -294,9 +294,15 @@ async def submit(request: Request):
             "detail": {...}
         }
     """
+    body = None
     try:
         # Parse request body
         body = await request.json()
+        
+        # Log incoming request
+        client_ip = request.client.host if request.client else "unknown"
+        logger.info(f"📥 Submission from {client_ip} | Body: {body}")
+        
         answer_sets = body.get("answerSets")
         
         if not answer_sets:
@@ -429,7 +435,15 @@ async def submit(request: Request):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error in submit: {e}", exc_info=True)
+        # Log detailed error with request body
+        client_ip = request.client.host if request.client else "unknown"
+        logger.error(
+            f"❌ ERROR in /submit from {client_ip}\n"
+            f"Request Body: {body}\n"
+            f"Error: {str(e)}\n"
+            f"Error Type: {type(e).__name__}",
+            exc_info=True
+        )
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 

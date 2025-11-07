@@ -43,9 +43,18 @@ def load_groundtruth(csv_path: str) -> Dict[int, GroundTruth]:
             scene_id = row['scene_id'].strip()
             video_id = row['video_id'].strip()
             
-            # Parse points - comma-separated
+            # Parse points - comma-separated (filter only digits)
             points_str = row['points'].strip().strip('"')  # Remove quotes if present
-            points = [int(p.strip()) for p in points_str.split(',') if p.strip() and p.strip().isdigit()]
+            
+            # Split and filter: only keep parts that are pure numbers
+            parts = [p.strip() for p in points_str.split(',')]
+            points = []
+            for p in parts:
+                # Try to convert to int, skip if not a number (e.g., "Mộc Châu")
+                try:
+                    points.append(int(p))
+                except ValueError:
+                    continue  # Skip non-numeric parts like "Mộc Châu"
             
             # Validate even number of points
             if len(points) % 2 != 0:

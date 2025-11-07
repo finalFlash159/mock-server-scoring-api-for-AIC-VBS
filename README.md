@@ -452,14 +452,44 @@ curl -X POST http://localhost:8000/submit \
 
 ## Scoring System
 
+### Tolerance and Distance-Based Scoring
+
+**NEW**: System uses tolerance-based matching with distance penalty:
+
+**Tolerance Values:**
+- **KIS/QA**: ±2500 ms (±2.5 seconds) from event center
+- **TR**: ±12 frames from event center
+
+**Score Decay:**
+- **At event center**: 100% score
+- **Within tolerance**: Linear decay (100% → 50%)
+- **At tolerance boundary**: 50% score
+- **Outside tolerance**: 0% score
+
+**Example (TR)**:
+```
+Groundtruth: [10000, 10050]
+Event center: 10025
+Half range: 25 frames
+Max distance: 25 + 12 = 37 frames
+
+User submits:
+- 10025 → distance=0  → 100% quality
+- 10037 → distance=12 → ~84% quality
+- 10050 → distance=25 → ~66% quality
+- 10062 → distance=37 → 50% quality (at boundary)
+- 10063 → distance=38 → 0% (outside tolerance)
+```
+
 ### Formula
 
 ```
-Score = max(0, P_base + (P_max - P_base) × fT(t) - k × P_penalty) × correctness_factor
+Score = max(0, P_base + (P_max - P_base) × fT(t) - k × P_penalty) × correctness_factor × match_quality
 ```
 
 Where:
 - **fT(t)** = Time factor = `1 - (t_submit / T_task)`
+- **match_quality** = Average match quality (0.5 to 1.0 based on distance from event centers)
 - **P_max** = Maximum score = 100
 - **P_base** = Base score = 50
 - **P_penalty** = Penalty per wrong submission = 10
@@ -469,14 +499,18 @@ Where:
 
 ### Correctness Factor
 
+**Match Quality Adjustment:**
+All scores are multiplied by `match_quality` (0.5-1.0) based on distance from event centers.
+
 **KIS / QA:**
-- 100% match: `correctness_factor = 1.0`
-- <100% match: `correctness_factor = 0.0`
+- Must match **ALL events** (100%)
+- Final factor = `match_quality` (affected by tolerance)
+- Missing any event → 0 score
 
 **TR (TRAKE):**
-- 100% match: `correctness_factor = 1.0`
-- 50-99% match: `correctness_factor = 0.5`
-- <50% match: `correctness_factor = 0.0`
+- 100% events matched: `factor = match_quality × 1.0`
+- 50-99% events matched: `factor = match_quality × 0.5`
+- <50% events matched: `factor = 0.0`
 
 ### Example Calculation
 
