@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - AIC 2025</title>
+    <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎮 Admin Dashboard</h1>
+            <div class="header-right">
+                <a href="/leaderboard-ui" target="_blank" class="btn btn-secondary">
+                    📊 View Leaderboard
+                </a>
+            </div>
+        </header>
+
+        <!-- Current Status Panel -->
+        <section class="status-panel" id="status-panel">
+            <div class="status-card">
+                <h3>Active Question</h3>
+                <div class="status-value" id="active-question">-</div>
+            </div>
+            <div class="status-card">
+                <h3>Time Remaining</h3>
+                <div class="status-value" id="time-remaining">-</div>
+            </div>
+            <div class="status-card">
+                <h3>Teams Submitted</h3>
+                <div class="status-value" id="teams-submitted">0</div>
+            </div>
+            <div class="status-card">
+                <h3>Completed</h3>
+                <div class="status-value" id="teams-completed">0</div>
+            </div>
+        </section>
+
+        <!-- Control Panel -->
+        <section class="control-panel">
+            <div class="panel-card">
+                <h2>Start Question</h2>
+                <div class="form-group">
+                    <label for="question-id">Question ID</label>
+                    <input 
+                        type="number" 
+                        id="question-id" 
+                        placeholder="Enter question ID (1-5)" 
+                        min="1" 
+                        max="5"
+                        value="1"
+                    >
+                </div>
+                <div class="question-info" id="question-info">
+                    <!-- Question details will be shown here -->
+                </div>
+                <button class="btn btn-primary btn-large" onclick="startQuestion()">
+                    ▶️ Start Question
+                </button>
+            </div>
+
+            <div class="panel-card">
+                <h2>Stop Question</h2>
+                <p class="description">Stop the currently active question and prevent further submissions.</p>
+                <div class="form-group">
+                    <label for="stop-question-id">Question ID</label>
+                    <input 
+                        type="number" 
+                        id="stop-question-id" 
+                        placeholder="Enter question ID to stop" 
+                        min="1" 
+                        max="5"
+                    >
+                </div>
+                <button class="btn btn-danger btn-large" onclick="stopQuestion()">
+                    ⏹️ Stop Question
+                </button>
+            </div>
+        </section>
+
+        <!-- Quick Actions -->
+        <section class="quick-actions">
+            <h2>Quick Actions</h2>
+            <div class="action-grid">
+                <button class="btn btn-action" onclick="startQuestionQuick(1)">
+                    Start Q1
+                </button>
+                <button class="btn btn-action" onclick="startQuestionQuick(2)">
+                    Start Q2
+                </button>
+                <button class="btn btn-action" onclick="startQuestionQuick(3)">
+                    Start Q3
+                </button>
+                <button class="btn btn-action" onclick="startQuestionQuick(4)">
+                    Start Q4
+                </button>
+                <button class="btn btn-action" onclick="startQuestionQuick(5)">
+                    Start Q5
+                </button>
+                <button class="btn btn-warning" onclick="resetAll()">
+                    🔄 Reset All
+                </button>
+            </div>
+        </section>
+
+        <!-- All Sessions Status -->
+        <section class="sessions-panel">
+            <h2>All Sessions Status</h2>
+            <div class="table-wrapper">
+                <table class="sessions-table" id="sessions-table">
+                    <thead>
+                        <tr>
+                            <th>Question</th>
+                            <th>Type</th>
+                            <th>Status</th>
+                            <th>Time Limit</th>
+                            <th>Submissions</th>
+                            <th>Completed</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sessions-tbody">
+                        <tr>
+                            <td colspan="6" class="loading">Loading sessions...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Response Log -->
+        <section class="log-panel">
+            <h2>Activity Log</h2>
+            <div class="log-container" id="log-container">
+                <div class="log-entry log-info">System initialized. Ready to start questions.</div>
+            </div>
+        </section>
+    </div>
+
+    <script src="/static/admin.js"></script>
+</body>
+</html>

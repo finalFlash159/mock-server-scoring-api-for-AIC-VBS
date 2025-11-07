@@ -54,6 +54,7 @@ class TeamSubmission(BaseModel):
     question_id: int
     submit_times: List[float] = []        # Timestamps of all submissions
     wrong_count: int = 0                  # k = number of wrong submissions
+    correct_count: int = 0                # Number of correct submissions (0 or 1)
     first_correct_time: Optional[float] = None
     final_score: Optional[float] = None
     is_completed: bool = False
@@ -67,6 +68,7 @@ class QuestionSession(BaseModel):
     buffer_time: int = 10                 # ±10s buffer
     is_active: bool = True
     team_submissions: Dict[str, TeamSubmission] = {}
+    fake_teams: Dict[str, TeamSubmission] = {}  # Fake teams for leaderboard
     
     class Config:
         arbitrary_types_allowed = True

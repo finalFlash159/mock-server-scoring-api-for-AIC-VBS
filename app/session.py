@@ -6,8 +6,59 @@ import time
 from typing import Dict, Optional, List
 from app.models import QuestionSession, TeamSubmission
 
+
 # Global storage: question_id → QuestionSession
 active_questions: Dict[int, QuestionSession] = {}
+
+
+def initialize_fake_teams(question_id: int, time_limit: int) -> Dict[str, TeamSubmission]:
+    """
+    Initialize fake teams with random submissions for leaderboard simulation
+    
+    Args:
+        question_id: Question ID
+        time_limit: Time limit for the question
+        
+    Returns:
+        Dictionary of fake team submissions
+    """
+    from app.fake_teams import (
+        generate_fake_team_names,
+        generate_weighted_score,
+        generate_submission_attempts,
+        generate_random_submit_time
+    )
+    
+    fake_teams = {}
+    team_names = generate_fake_team_names(15)  # Generate 15 fake teams
+    current_time = time.time()
+    
+    for name in team_names:
+        wrong_count, correct_count = generate_submission_attempts()
+        
+        # Generate submission time if team submitted
+        submit_time = None
+        if correct_count > 0:
+            elapsed = generate_random_submit_time(time_limit)
+            submit_time = current_time + elapsed
+        
+        # Generate score based on whether team completed
+        score = 0.0
+        if correct_count > 0:
+            score = generate_weighted_score()
+        
+        team_sub = TeamSubmission(
+            team_id=name,
+            question_id=question_id,
+            wrong_count=wrong_count,
+            correct_count=correct_count,
+            is_completed=(correct_count > 0),
+            final_score=score if correct_count > 0 else None,
+            first_correct_time=submit_time
+        )
+        fake_teams[name] = team_sub
+    
+    return fake_teams
 
 
 def start_question(question_id: int, time_limit: int = 300, buffer_time: int = 10) -> QuestionSession:
@@ -28,10 +79,12 @@ def start_question(question_id: int, time_limit: int = 300, buffer_time: int = 1
         time_limit=time_limit,
         buffer_time=buffer_time,
         is_active=True,
-        team_submissions={}
+        team_submissions={},
+        fake_teams=initialize_fake_teams(question_id, time_limit)
     )
     active_questions[question_id] = session
     print(f"✅ Question {question_id} started at {session.start_time}")
+    print(f"✅ Generated {len(session.fake_teams)} fake teams for leaderboard")
     return session
 
 
@@ -110,7 +163,8 @@ def record_submission(
             team_id=team_id,
             question_id=question_id,
             submit_times=[],
-            wrong_count=0
+            wrong_count=0,
+            correct_count=0
         )
     
     team_sub = session.team_submissions[team_id]
@@ -119,6 +173,7 @@ def record_submission(
     if not is_correct:
         team_sub.wrong_count += 1
     else:
+        team_sub.correct_count += 1
         if not team_sub.is_completed:  # First correct submission
             team_sub.is_completed = True
             team_sub.first_correct_time = time.time()

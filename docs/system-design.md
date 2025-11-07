@@ -1,4 +1,4 @@
-# System Design - AIC 2025 Scoring Server (Competition Mode)
+# System Design - AIC 2025 Scoring Server (Competition Mode + Leaderboard UI)
 
 ## Architecture Overview
 
@@ -6,7 +6,10 @@
 graph TB
     Admin[Admin] -->|Start/Stop| API[FastAPI Server]
     Team[Team] -->|Submit| API
+    Browser[Browser] -->|View| UI[Leaderboard UI]
+    UI -->|Fetch| API
     API -->|Manage| Session[Session Manager]
+    Session -->|Generate| Fake[Fake Teams]
     API -->|Load GT| CSV[groundtruth.csv]
     API -->|Normalize| Normalizer[Normalizer]
     Normalizer -->|KIS/QA/TR| Submission[NormalizedSubmission]
@@ -16,31 +19,36 @@ graph TB
     Config[current_task.yaml] -->|Parameters| Scorer
     Scorer -->|Results| Response[JSON Response]
     Response -->|HTTP 200| Team
-    Session -->|Rankings| Leaderboard[Leaderboard]
+    Session -->|Real + Fake Teams| Leaderboard[Leaderboard Data]
+    Leaderboard -->|JSON| UI
     
     style API fill:#4CAF50
     style Session fill:#9C27B0
     style Scorer fill:#FF9800
     style Response fill:#2196F3
+    style UI fill:#2196F3
+    style Fake fill:#FFC107
 ```
 
-**Key Changes in Competition Mode:**
+**Key Features:**
 - Server-controlled timing (admin starts/stops questions)
-- Session management tracks teams and submissions
+- Session management tracks real + fake teams
 - Penalty system for wrong submissions
 - Time-based scoring with exact match
-- Real-time leaderboard
+- Real-time leaderboard UI with simulated competitors
+- All API submissions mapped to "0THING2LOSE" team
 
 ## Component Architecture
 
 ### 1. FastAPI Server (`app/main.py`)
 
-Main application server with admin and public endpoints:
+Main application server with admin, public, and UI endpoints:
 
 ```mermaid
 graph TB
     A[FastAPI App] --> B[Admin Endpoints]
     A --> C[Public Endpoints]
+    A --> D[UI Endpoints]
     
     B --> B1[POST /admin/start-question]
     B --> B2[POST /admin/stop-question]
@@ -52,16 +60,22 @@ graph TB
     C --> C3[GET /question/:id/status]
     C --> C4[GET /leaderboard]
     C --> C5[POST /submit]
+    
+    D --> D1[GET /leaderboard-ui]
+    D --> D2[GET /api/leaderboard-data]
+    D --> D3[Static Files]
 ```
 
 **Responsibilities:**
 - Handle HTTP requests/responses
 - CORS middleware for development
 - Load groundtruth on startup
-- Manage question sessions
+- Manage question sessions (real + fake teams)
 - Track team submissions
+- Force map all submissions to "0THING2LOSE"
 - Calculate scores with time and penalties
-- Generate leaderboard
+- Generate leaderboard with simulated competitors
+- Serve real-time UI
 
 ### 2. Data Models (`app/models.py`)
 
@@ -89,11 +103,14 @@ classDiagram
         +int buffer_time
         +bool is_active
         +Dict team_submissions
+        +Dict fake_teams
     }
     
     class TeamSubmission {
         +str team_id
+        +int question_id
         +int wrong_count
+        +int correct_count
         +List submit_times
         +bool is_completed
         +float first_correct_time
@@ -123,10 +140,12 @@ classDiagram
 - Server-controlled question timing
 - Tracks all team submissions for the question
 - Manages active/inactive state
+- Contains both real teams and fake teams for leaderboard
 
 **TeamSubmission:**
 - Per-team tracking within a question
-- Records wrong attempts and timing
+- Records wrong attempts (wrong_count) and correct attempts (correct_count)
+- Stores submission timing
 - Stores final score after completion
 
 **ScoringParams:**
@@ -134,13 +153,36 @@ classDiagram
 - p_max=100, p_base=50, p_penalty=10
 - time_limit=300s, buffer_time=10s
 
-### 3. Session Manager (`app/session.py`)
+### 3. Fake Teams Generator (`app/fake_teams.py`)
+
+**NEW COMPONENT** for leaderboard simulation:
+
+```python
+# Key Functions:
+- generate_fake_team_names(count) → List[str]
+  # Creates 15 unique team names
+  
+- generate_weighted_score() → float
+  # Score distribution: 80-100 (15%), 60-80 (30%), 40-60 (35%), 0-40 (20%)
+  
+- should_submit() → bool
+  # 85% teams submit, 15% don't
+  
+- generate_submission_attempts() → (wrong, correct)
+  # 60% correct first try
+  # 25% 1 wrong then correct
+  # 10% 2-3 wrong then correct
+  # 5% only wrong attempts
+```
+
+### 4. Session Manager (`app/session.py`)
 
 Server-controlled question timing and team tracking:
 
 ```mermaid
 flowchart TD
     A[Admin Starts Question] --> B[Create QuestionSession]
+    B --> B1[Generate 15 Fake Teams]
     B --> C[Record start_time]
     C --> D[Set time_limit + buffer]
     D --> E[Session Active]
@@ -507,6 +549,99 @@ aggregation: "mean"        # How to combine event scores: mean/min/sum
 - `min`: Take lowest score (strict, all events must be good)
 - `sum`: Sum all scores (rewards multiple correct events)
 
+## Real-time Leaderboard UI
+
+### Frontend Architecture (`static/`)
+
+```
+static/
+├── leaderboard.html    # Main UI structure
+├── leaderboard.css     # Styling and animations
+└── leaderboard.js      # Auto-refresh logic
+```
+
+**Key Features:**
+
+1. **Auto-refresh:** Polls `/api/leaderboard-data` every 2 seconds
+2. **Submission indicators:**
+   - ✅ Green checkmark = correct submission
+   - ❌ Red X = wrong submission
+   - Shows count of each type
+3. **Score color coding:**
+   - High (80-100): Green gradient
+   - Good (60-80): Light green
+   - Medium (40-60): Amber/Yellow
+   - Low (0-40): Red
+4. **Team highlighting:**
+   - "0THING2LOSE" = real team (purple gradient, ⭐ icon)
+   - All other teams = fake/simulated
+5. **Rankings:**
+   - 🥇 Gold medal for 1st place
+   - 🥈 Silver medal for 2nd place
+   - 🥉 Bronze medal for 3rd place
+
+### Data Flow
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant FastAPI
+    participant Session
+    participant Fake
+    
+    Browser->>FastAPI: GET /leaderboard-ui
+    FastAPI->>Browser: HTML page
+    
+    loop Every 2 seconds
+        Browser->>FastAPI: GET /api/leaderboard-data
+        FastAPI->>Session: Get all sessions
+        Session->>FastAPI: Real teams data
+        Session->>Fake: Get fake teams
+        Fake->>FastAPI: Fake teams data
+        FastAPI->>Browser: JSON (real + fake teams)
+        Browser->>Browser: Update table
+    end
+```
+
+### API Response Format
+
+```json
+{
+  "questions": [1, 2, 3, 4, 5],
+  "teams": [
+    {
+      "team_name": "0THING2LOSE",
+      "is_real": true,
+      "questions": {
+        "1": {
+          "wrong_count": 1,
+          "correct_count": 1,
+          "score": 85.5
+        },
+        "2": {
+          "wrong_count": 0,
+          "correct_count": 1,
+          "score": 92.0
+        }
+      },
+      "total_score": 177.5
+    },
+    {
+      "team_name": "CodeNinja",
+      "is_real": false,
+      "questions": {
+        "1": {
+          "wrong_count": 0,
+          "correct_count": 1,
+          "score": 88.3
+        }
+      },
+      "total_score": 88.3
+    }
+  ]
+}
+```
+
 ## Testing Strategy
 
 ### Unit Tests (`tests/test_scoring.py`)
@@ -515,6 +650,8 @@ aggregation: "mean"        # How to combine event scores: mean/min/sum
 - Test scoring functions with various distances
 - Test aggregation methods (mean/min/sum)
 - Test edge cases (missing events, out of range)
+- Test competition formula with time factors
+- Test exact match logic
 
 ### Integration Testing
 

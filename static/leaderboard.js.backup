@@ -1,0 +1,228 @@
+// API Configuration
+const API_URL = '/api/leaderboard-data';
+const REFRESH_INTERVAL = 2000; // 2 seconds
+
+// State management
+let previousData = null;
+
+/**
+ * Fetch leaderboard data from API
+ */
+async function fetchLeaderboard() {
+    try {
+        const response = await fetch(API_URL);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        updateLeaderboard(data);
+    } catch (error) {
+        console.error('Failed to fetch leaderboard:', error);
+        showError('Failed to load leaderboard data');
+    }
+}
+
+/**
+ * Update the leaderboard table with new data
+ */
+function updateLeaderboard(data) {
+    // Update question headers
+    updateQuestionHeaders(data.questions);
+    
+    // Update team rows
+    updateTeamRows(data);
+    
+    // Store for comparison
+    previousData = data;
+}
+
+/**
+ * Update question column headers
+ */
+function updateQuestionHeaders(questions) {
+    const headerRow = document.getElementById('question-headers');
+    
+    if (headerRow.children.length === questions.length) {
+        return; // Already populated
+    }
+    
+    headerRow.innerHTML = '';
+    
+    questions.forEach(qId => {
+        const th = document.createElement('th');
+        th.textContent = `Q${qId}`;
+        th.className = 'question-header';
+        headerRow.appendChild(th);
+    });
+}
+
+/**
+ * Update team rows in the table
+ */
+function updateTeamRows(data) {
+    const tbody = document.getElementById('leaderboard-body');
+    tbody.innerHTML = '';
+    
+    if (!data.teams || data.teams.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="loading">No data available</td></tr>';
+        return;
+    }
+    
+    data.teams.forEach((team, index) => {
+        const row = createTeamRow(team, index + 1, data.questions);
+        tbody.appendChild(row);
+    });
+}
+
+/**
+ * Create a table row for a team
+ */
+function createTeamRow(team, rank, questions) {
+    const row = document.createElement('tr');
+    
+    // Add special class for real team
+    if (team.is_real) {
+        row.className = 'real-team-row';
+    }
+    
+    // Rank column
+    const rankCell = document.createElement('td');
+    rankCell.className = 'rank-badge';
+    if (rank === 1) {
+        rankCell.className += ' gold';
+        rankCell.textContent = '🥇';
+    } else if (rank === 2) {
+        rankCell.className += ' silver';
+        rankCell.textContent = '🥈';
+    } else if (rank === 3) {
+        rankCell.className += ' bronze';
+        rankCell.textContent = '🥉';
+    } else {
+        rankCell.textContent = rank;
+    }
+    row.appendChild(rankCell);
+    
+    // Team name column
+    const teamCell = document.createElement('td');
+    teamCell.className = 'team-col';
+    if (team.is_real) {
+        teamCell.innerHTML = `<span class="real-team-badge">⭐</span>${team.team_name}`;
+    } else {
+        teamCell.textContent = team.team_name;
+    }
+    row.appendChild(teamCell);
+    
+    // Question columns
+    questions.forEach(qId => {
+        const qCell = document.createElement('td');
+        qCell.className = 'submission-cell';
+        
+        const qData = team.questions[qId];
+        
+        if (!qData || (qData.wrong_count === 0 && qData.correct_count === 0)) {
+            // No submission
+            qCell.innerHTML = '<div class="no-submission">-</div>';
+        } else {
+            // Build submission icons
+            const iconsDiv = document.createElement('div');
+            iconsDiv.className = 'submission-icons';
+            
+            // Add correct icons (green checkmarks)
+            for (let i = 0; i < qData.correct_count; i++) {
+                const icon = document.createElement('span');
+                icon.className = 'icon correct';
+                icon.textContent = '✅';
+                iconsDiv.appendChild(icon);
+            }
+            
+            // Add wrong icons (red X)
+            for (let i = 0; i < qData.wrong_count; i++) {
+                const icon = document.createElement('span');
+                icon.className = 'icon wrong';
+                icon.textContent = '❌';
+                iconsDiv.appendChild(icon);
+            }
+            
+            // Add score
+            const scoreDiv = document.createElement('div');
+            scoreDiv.className = `score ${getScoreClass(qData.score)}`;
+            scoreDiv.textContent = qData.score.toFixed(1);
+            
+            qCell.appendChild(iconsDiv);
+            qCell.appendChild(scoreDiv);
+        }
+        
+        row.appendChild(qCell);
+    });
+    
+    // Total score column
+    const totalCell = document.createElement('td');
+    totalCell.className = 'total-score';
+    totalCell.textContent = team.total_score.toFixed(1);
+    row.appendChild(totalCell);
+    
+    return row;
+}
+
+/**
+ * Get CSS class for score based on value
+ */
+function getScoreClass(score) {
+    if (score >= 80) return 'score-high';
+    if (score >= 60) return 'score-good';
+    if (score >= 40) return 'score-medium';
+    if (score > 0) return 'score-low';
+    return 'score-low';
+}
+
+/**
+ * Show error message
+ */
+function showError(message) {
+    const tbody = document.getElementById('leaderboard-body');
+    tbody.innerHTML = `<tr><td colspan="8" class="loading" style="color: #f44336;">${message}</td></tr>`;
+}
+
+/**
+ * Format time ago
+ */
+function timeAgo(timestamp) {
+    const seconds = Math.floor((Date.now() - timestamp * 1000) / 1000);
+    
+    if (seconds < 60) return 'just now';
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+    return `${Math.floor(seconds / 86400)}d ago`;
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('🏆 Leaderboard initialized');
+    
+    // Initial fetch
+    fetchLeaderboard();
+    
+    // Set up auto-refresh
+    setInterval(fetchLeaderboard, REFRESH_INTERVAL);
+    
+    // Update live indicator
+    const dot = document.querySelector('.dot');
+    if (dot) {
+        setInterval(() => {
+            dot.style.animation = 'none';
+            setTimeout(() => {
+                dot.style.animation = 'pulse 2s infinite';
+            }, 10);
+        }, 2000);
+    }
+});
+
+// Log when tab becomes visible/hidden
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        console.log('⏸️  Leaderboard tab hidden');
+    } else {
+        console.log('▶️  Leaderboard tab visible');
+        fetchLeaderboard(); // Refresh immediately when tab becomes visible
+    }
+});

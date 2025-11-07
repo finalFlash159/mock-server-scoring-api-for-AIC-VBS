@@ -1,11 +1,13 @@
 # AIC 2025 - Scoring Server (Competition Mode)
 
-Mock scoring server for AIC 2025 supporting 3 task types: **KIS**, **QA**, **TR** with **server-controlled timing**, **penalty system**, and **exact match scoring**.
+Mock scoring server for AIC 2025 supporting 3 task types: **KIS**, **QA**, **TR** with **server-controlled timing**, **penalty system**, **exact match scoring**, **admin dashboard**, and **real-time leaderboard UI**.
 
 ## Table of Contents
 
 - [Setup and Run](#setup-and-run)
 - [Competition Mode Overview](#competition-mode-overview)
+- [Admin Dashboard](#admin-dashboard)
+- [Real-time Leaderboard UI](#real-time-leaderboard-ui)
 - [Groundtruth CSV Format](#groundtruth-csv-format)
 - [Admin Controls](#admin-controls)
 - [API Request Format](#api-request-format)
@@ -35,6 +37,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 Server runs at: `http://localhost:8000`
 
+**Web Interfaces:**
+- 🎮 **Admin Dashboard:** `http://localhost:8000/admin-dashboard`
+- 📊 **Leaderboard UI:** `http://localhost:8000/leaderboard-ui`
+
 ### 3. Test
 
 ```bash
@@ -55,13 +61,94 @@ curl http://localhost:8000/config
 - ✅ **Exact match:** No tolerance, must match groundtruth exactly
 - 🏆 **Leaderboard:** Real-time rankings by score and time
 - 🔒 **One completion per team:** Can't submit after correct answer
+- 🎯 **Real-time UI:** Live leaderboard with submission tracking
 
 **Workflow:**
-1. Admin starts question with timer
-2. Teams submit answers (tracked by `team_id`)
-3. System calculates score based on time and penalties
-4. Leaderboard updates automatically
-5. Admin stops question when time expires
+1. **Admin opens dashboard** at `/admin-dashboard`
+2. **Starts question** via web UI (auto-loads time settings from CSV)
+3. **Teams submit answers** through API (all mapped to "0THING2LOSE")
+4. **System calculates score** based on time and penalties
+5. **Leaderboard updates** automatically with real + fake teams
+6. **Admin stops question** when time expires or manually
+
+## Admin Dashboard
+
+**Access at:** `http://localhost:8000/admin-dashboard`
+
+**Features:**
+- 📊 **Status Panel:** Real-time view of active question, teams submitted/completed, countdown timer
+- 🎮 **Question Control:** Start/stop questions with auto-configuration from CSV
+- ⚡ **Quick Actions:** One-click buttons to start Q1-Q5, reset competition
+- 📋 **Session History:** Table showing all past question sessions with duration and team stats
+- 📝 **Activity Log:** Live feed of submissions and system events
+- ⏱️ **Smooth Countdown:** Updates every second for precise time tracking
+
+**Auto-Configuration:**
+- Just enter **Question ID** (e.g., "Q1")
+- System automatically loads:
+  - ⏱️ **Time Limit:** Default 300 seconds (5 minutes) from CSV
+  - 🔄 **Buffer Time:** Default 10 seconds grace period
+  - � **Max Points:** From groundtruth data
+- No manual time input needed!
+
+**Color Scheme:**
+- 🟢 **Green:** Active/Success states
+- 🔴 **Red:** Inactive/Error states
+- ⚫ **Black:** Background (dark theme)
+- ⚪ **White:** Text and labels
+
+**API Endpoints:**
+- `GET /api/competition/status` - Current question status and countdown
+- `POST /api/competition/start` - Start question (auto-fetch config)
+- `POST /api/competition/stop` - Stop active question
+- `GET /config` - All questions with time settings
+
+## Real-time Leaderboard UI
+
+**Access at:** `http://localhost:8000/leaderboard-ui`
+
+**Dual-View System:**
+
+### 1️⃣ Real-time Tab (Grid View)
+- 🎯 **Active Question Only:** Shows current question being played
+- 🟩 **Grid Layout:** Each team in a card (responsive 4-column grid)
+- 🎨 **3-Color Theme:** Black background, green (correct), red (wrong), white text
+- ⭐ **0THING2LOSE Highlight:** Your team always appears top-left
+- 📊 **Live Stats:** Score, submission count (✓/✗), submission time
+- 🔄 **Auto-refresh:** Every 2 seconds
+
+**Grid Card Layout:**
+```
+┌─────────────────────┐  ┌─────────────────────┐
+│ ⭐ 0THING2LOSE      │  │ CodeNinja           │
+│ 85.5 pts           │  │ 92.0 pts           │
+│ ✓✓ | ✗ (3 subs)    │  │ ✓ (1 sub)          │
+│ ⏱️ 2m 15s          │  │ ⏱️ 1m 30s          │
+└─────────────────────┘  └─────────────────────┘
+```
+
+### 2️⃣ Overall Tab (Table View)
+- 📊 **All Questions:** Complete competition overview
+- 🏆 **Rankings:** Sorted by total score
+- ✅ **Submission Icons:** Green ✓ for correct, red ✗ for wrong
+- � **Question Breakdown:** Individual scores for each question
+- 🤖 **15 Fake Teams:** Realistic competition simulation
+
+**Table Layout:**
+```
+┌──────┬────────────┬─────────────┬─────────────┬────────┐
+│ Rank │ Team       │ Q1          │ Q2          │ Total  │
+├──────┼────────────┼─────────────┼─────────────┼────────┤
+│  🥇  │ ⭐ 0THIN.. │ ✅✅ | ❌   │ ✅          │  175.5 │
+│      │            │   85.5      │   90.0      │        │
+├──────┼────────────┼─────────────┼─────────────┼────────┤
+│  🥈  │ CodeNinja  │ ✅          │ ✅✅        │  168.3 │
+│      │            │   92.0      │   76.3      │        │
+└──────┴────────────┴─────────────┴─────────────┴────────┘
+```
+
+**API Endpoint:**
+- `GET /api/leaderboard-data` - JSON data for all questions and teams
 
 ## Groundtruth CSV Format
 
@@ -86,9 +173,24 @@ id,type,scene_id,video_id,points
 
 ## Admin Controls
 
-Admin endpoints control question timing and sessions.
+Control competition through **Web Dashboard** or **API endpoints**.
 
-### Start Question
+### Method 1: Admin Dashboard (Recommended)
+
+**Access:** `http://localhost:8000/admin-dashboard`
+
+**Quick Start:**
+1. Enter Question ID (e.g., "Q1")
+2. View auto-detected time settings
+3. Click "Start Question"
+4. Monitor countdown and submissions
+5. Click "Stop Question" when done
+
+**Or use Quick Actions for Q1-Q5 with one click!**
+
+### Method 2: API Endpoints
+
+#### Start Question
 
 ```bash
 curl -X POST http://localhost:8000/admin/start-question \
@@ -112,7 +214,7 @@ curl -X POST http://localhost:8000/admin/start-question \
 }
 ```
 
-### Stop Question
+#### Stop Question
 
 ```bash
 curl -X POST http://localhost:8000/admin/stop-question \
@@ -120,13 +222,30 @@ curl -X POST http://localhost:8000/admin/stop-question \
   -d '{"question_id": 1}'
 ```
 
-### Reset All Sessions (Testing Only)
+#### Get Competition Status
+
+```bash
+curl http://localhost:8000/api/competition/status
+```
+
+**Response:**
+```json
+{
+  "is_active": true,
+  "active_question_id": 1,
+  "remaining_time": 287.5,
+  "teams_submitted": 1,
+  "teams_completed": 1
+}
+```
+
+#### Reset All Sessions (Testing Only)
 
 ```bash
 curl -X POST http://localhost:8000/admin/reset-all
 ```
 
-### List Active Sessions
+#### List Active Sessions
 
 ```bash
 curl http://localhost:8000/admin/sessions

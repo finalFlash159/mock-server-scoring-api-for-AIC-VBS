@@ -4,9 +4,12 @@ AIC 2025 - Scoring Server for Multiple Events with Competition Mode
 """
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse
 from contextlib import asynccontextmanager
 from typing import Optional
 import logging
+import os
 
 from app.config import load_config, update_active_question
 from app.groundtruth_loader import load_groundtruth
@@ -17,7 +20,7 @@ from app.session import (
     start_question, stop_question, get_question_session,
     is_question_active, get_elapsed_time, get_remaining_time,
     get_team_submission, record_submission, get_question_leaderboard,
-    get_all_sessions_status, reset_all_questions
+    get_all_sessions_status, reset_all_questions, active_questions
 )
 
 # Setup logging
@@ -240,7 +243,21 @@ async def get_config():
             "fps": cfg.fps,
             "max_score": cfg.max_score,
             "frame_tolerance": cfg.frame_tolerance,
-            "aggregation": cfg.aggregation
+            "aggregation": cfg.aggregation,
+            # Add all questions info for admin dashboard
+            "questions": {
+                qid: {
+                    "type": q.type,
+                    "video_id": q.video_id,
+                    "scene_id": q.scene_id,
+                    "points": "-".join(map(str, q.points)),
+                    "num_events": len(q.points) // 2,
+                    # Default time settings based on question type
+                    "default_time_limit": 300,  # 5 minutes default
+                    "default_buffer_time": 10   # 10 seconds buffer
+                }
+                for qid, q in GT_TABLE.items()
+            }
         }
     except FileNotFoundError as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -286,6 +303,10 @@ async def submit(request: Request):
         
         if not team_id:
             raise HTTPException(status_code=400, detail="team_id required")
+        
+        # FORCE MAP ALL SUBMISSIONS TO "0THING2LOSE"
+        original_team_id = team_id
+        team_id = "0THING2LOSE"
         
         if not answer_sets:
             raise HTTPException(status_code=400, detail="answerSets required")
@@ -430,6 +451,115 @@ async def list_questions():
         })
     
     return {"questions": questions}
+
+
+# ==================== LEADERBOARD UI ENDPOINTS ====================
+
+@app.get("/api/leaderboard-data")
+async def get_leaderboard_data():
+    """
+    Get comprehensive leaderboard data for all questions
+    
+    Returns data for rendering leaderboard UI with:
+    - All questions
+    - All teams (real + fake)
+    - Submission counts (✅ correct, ❌ wrong)
+    - Scores per question
+    - Total scores
+    """
+    if not GT_TABLE:
+        return {"questions": [], "teams": []}
+    
+    all_questions = sorted(GT_TABLE.keys())
+    teams_data = {}
+    
+    # Collect data from all sessions
+    for q_id in all_questions:
+        session = get_question_session(q_id)
+        if not session:
+            continue
+        
+        # Merge real teams + fake teams
+        all_teams = {**session.team_submissions, **session.fake_teams}
+        
+        for team_id, team_sub in all_teams.items():
+            if team_id not in teams_data:
+                teams_data[team_id] = {
+                    "team_name": team_id,
+                    "is_real": (team_id == "0THING2LOSE"),
+                    "questions": {},
+                    "total_score": 0
+                }
+            
+            # Add question data
+            teams_data[team_id]["questions"][q_id] = {
+                "wrong_count": team_sub.wrong_count,
+                "correct_count": team_sub.correct_count,
+                "score": round(team_sub.final_score, 1) if team_sub.final_score else 0
+            }
+            
+            # Accumulate total score
+            teams_data[team_id]["total_score"] += (team_sub.final_score or 0)
+    
+    # Sort teams by total score (descending)
+    teams_list = sorted(
+        teams_data.values(),
+        key=lambda x: x["total_score"],
+        reverse=True
+    )
+    
+    # Round total scores
+    for team in teams_list:
+        team["total_score"] = round(team["total_score"], 1)
+    
+    # Detect active question (most recent active session)
+    active_question_id = None
+    for q_id in sorted(active_questions.keys(), reverse=True):
+        session = active_questions.get(q_id)
+        if session and session.is_active:
+            active_question_id = q_id
+            break
+    
+    return {
+        "active_question_id": active_question_id,  # NEW: For real-time view
+        "questions": all_questions,
+        "teams": teams_list
+    }
+
+
+@app.get("/leaderboard-ui", response_class=HTMLResponse)
+async def leaderboard_ui():
+    """Serve the leaderboard HTML page"""
+    html_path = "static/leaderboard.html"
+    
+    if not os.path.exists(html_path):
+        return HTMLResponse(
+            content="<h1>Leaderboard UI not found</h1><p>Please create static/leaderboard.html</p>",
+            status_code=404
+        )
+    
+    with open(html_path, "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
+@app.get("/admin-dashboard", response_class=HTMLResponse)
+async def admin_dashboard():
+    """Serve the admin dashboard HTML page"""
+    html_path = "static/admin.html"
+    
+    if not os.path.exists(html_path):
+        return HTMLResponse(
+            content="<h1>Admin Dashboard not found</h1><p>Please create static/admin.html</p>",
+            status_code=404
+        )
+    
+    with open(html_path, "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
+# Mount static files directory
+if os.path.exists("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 if __name__ == "__main__":
