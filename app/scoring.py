@@ -1,157 +1,200 @@
 """
-Scoring functions for multiple events
+AIC 2025 Scoring Engine - Competition Rules
+
+Formula:
+  fT(t) = 1 - (t_submit / T_task)
+  Score = max(0, P_base + (P_max - P_base) × fT(t) - k × P_penalty) × correctness_factor
+
+Rules:
+  - KIS/QA: Only score if 100% correct
+  - TRAKE: 100% → factor 1.0, 50-99% → factor 0.5, <50% → factor 0.0
+  - Exact match only (no tolerance)
 """
-from typing import List, Tuple, Dict, Any
-from app.models import NormalizedSubmission, GroundTruth, Config
+from typing import List, Tuple, Dict
+from app.models import GroundTruth, NormalizedSubmission, ScoringParams
 from app.utils import points_to_events
 
 
-def score_event_ms(user_ms: int, gt_start_ms: int, gt_end_ms: int, cfg: Config) -> float:
+def calculate_time_factor(t_submit: float, t_task: float) -> float:
     """
-    Score a single event for KIS/QA (using milliseconds)
+    Calculate time factor fT(t)
     
-    Scoring logic:
-    - Tolerance applies to both ends of the event range
-    - Valid range: [start - tolerance, end + tolerance]
-    - Score decreases from 100 at midpoint to 0 at range boundaries
+    Formula: fT(t) = 1 - (t_submit / T_task)
     
     Args:
-        user_ms: User submitted millisecond value
-        gt_start_ms: Ground truth event start (ms)
-        gt_end_ms: Ground truth event end (ms)
-        cfg: Configuration object
-        
+        t_submit: Submission time (seconds)
+        t_task: Time limit (seconds)
+    
     Returns:
-        Score for this event (0.0 to max_score)
+        Time factor in range [0.0, 1.0]
     """
-    # Convert tolerance to milliseconds
-    frame_ms = 1000.0 / cfg.fps
-    tolerance_ms = cfg.frame_tolerance * frame_ms
-    
-    # Calculate valid range (tolerance applies to both ends)
-    range_start = gt_start_ms - tolerance_ms
-    range_end = gt_end_ms + tolerance_ms
-    
-    # Check if user value is within valid range
-    if user_ms < range_start or user_ms > range_end:
+    if t_submit >= t_task:
         return 0.0
-    
-    # Calculate midpoint and distance
-    mid = (gt_start_ms + gt_end_ms) / 2.0
-    dist_ms = abs(user_ms - mid)
-    dist_frames = dist_ms / frame_ms
-    
-    # Calculate score with decay from midpoint
-    score = cfg.max_score - (dist_frames * cfg.decay_per_frame)
-    
-    return max(score, 0.0)
+    return 1.0 - (t_submit / t_task)
 
 
-def score_event_frame(user_frame: int, gt_start_f: int, gt_end_f: int, cfg: Config) -> float:
+def check_exact_match(user_values: List[int], gt_events: List[Tuple[int, int]]) -> Tuple[int, int]:
     """
-    Score a single event for TR (using frame_id directly)
+    Check exact match without tolerance
     
-    Scoring logic:
-    - Tolerance applies to both ends of the event range
-    - Valid range: [start - tolerance, end + tolerance]
-    - Score decreases from 100 at midpoint to 0 at range boundaries
+    Logic:
+    - Each user_value must match EXACTLY with gt_start OR gt_end
+    - One event can be matched by multiple user values
+    - We count how many events have at least one match
     
     Args:
-        user_frame: User submitted frame_id
-        gt_start_f: Ground truth event start (frame_id)
-        gt_end_f: Ground truth event end (frame_id)
-        cfg: Configuration object
-        
-    Returns:
-        Score for this event (0.0 to max_score)
-    """
-    # Calculate valid range (tolerance applies to both ends)
-    range_start = gt_start_f - cfg.frame_tolerance
-    range_end = gt_end_f + cfg.frame_tolerance
+        user_values: User submitted values
+        gt_events: Ground truth events [(start, end), ...]
     
-    # Check if user value is within valid range
-    if user_frame < range_start or user_frame > range_end:
+    Returns:
+        (matched_events, total_events)
+    """
+    total_events = len(gt_events)
+    matched_events_set = set()
+    
+    for user_val in user_values:
+        for idx, (gt_start, gt_end) in enumerate(gt_events):
+            # Check exact match with start or end
+            if user_val == gt_start or user_val == gt_end:
+                matched_events_set.add(idx)
+                break
+    
+    matched_events = len(matched_events_set)
+    return matched_events, total_events
+
+
+def calculate_correctness_factor(matched: int, total: int, task_type: str) -> float:
+    """
+    Calculate correctness factor based on task type
+    
+    Rules:
+    - KIS/QA: Only get score if 100% correct (matched == total)
+    - TRAKE: 
+      - 100%: factor = 1.0 (full score)
+      - 50-99%: factor = 0.5 (half score)
+      - <50%: factor = 0.0 (no score)
+    
+    Args:
+        matched: Number of matched events
+        total: Total number of events
+        task_type: "KIS" | "QA" | "TR"
+    
+    Returns:
+        Correctness factor: 0.0 | 0.5 | 1.0
+    """
+    if total == 0:
         return 0.0
     
-    # Calculate midpoint and distance
-    mid = (gt_start_f + gt_end_f) / 2.0
-    dist_frames = abs(user_frame - mid)
+    percentage = (matched / total) * 100
     
-    # Calculate score with decay from midpoint
-    score = cfg.max_score - (dist_frames * cfg.decay_per_frame)
+    if task_type in ["KIS", "QA"]:
+        # KIS/QA: Only score if 100%
+        return 1.0 if percentage == 100 else 0.0
     
-    return max(score, 0.0)
+    elif task_type == "TR":
+        # TRAKE: 100% → 1.0, 50-99% → 0.5, <50% → 0.0
+        if percentage == 100:
+            return 1.0
+        elif percentage >= 50:
+            return 0.5
+        else:
+            return 0.0
+    
+    return 0.0
+
+
+def calculate_final_score(
+    matched: int,
+    total: int,
+    task_type: str,
+    t_submit: float,
+    k: int,
+    params: ScoringParams
+) -> Dict:
+    """
+    Calculate final score using AIC 2025 formula
+    
+    Formula:
+        fT(t) = 1 - (t_submit / T_task)
+        base_score = P_base + (P_max - P_base) × fT(t)
+        penalty = k × P_penalty
+        score_before_correctness = max(0, base_score - penalty)
+        final_score = score_before_correctness × correctness_factor
+    
+    Args:
+        matched: Number of matched events
+        total: Total number of events
+        task_type: Task type (KIS/QA/TR)
+        t_submit: Submission time (seconds)
+        k: Number of wrong submissions before this
+        params: ScoringParams object
+    
+    Returns:
+        Dictionary with scoring details
+    """
+    # 1. Calculate time factor
+    fT = calculate_time_factor(t_submit, params.time_limit)
+    
+    # 2. Calculate correctness factor
+    correctness_factor = calculate_correctness_factor(matched, total, task_type)
+    percentage = (matched / total * 100) if total > 0 else 0
+    
+    # 3. Calculate base score (before penalty and correctness)
+    base_score = params.p_base + (params.p_max - params.p_base) * fT
+    
+    # 4. Calculate penalty
+    penalty = k * params.p_penalty
+    
+    # 5. Calculate final score
+    score_before_correctness = max(0, base_score - penalty)
+    final_score = score_before_correctness * correctness_factor
+    
+    return {
+        "score": round(final_score, 2),
+        "correctness_factor": correctness_factor,
+        "time_factor": round(fT, 4),
+        "base_score": round(base_score, 2),
+        "penalty": penalty,
+        "percentage": round(percentage, 2),
+        "matched_events": matched,
+        "total_events": total
+    }
 
 
 def score_submission(
-    sub: NormalizedSubmission, 
-    gt: GroundTruth, 
-    cfg: Config
-) -> Tuple[float, Dict[str, Any]]:
+    submission: NormalizedSubmission,
+    ground_truth: GroundTruth,
+    t_submit: float,
+    k: int,
+    params: ScoringParams
+) -> Dict:
     """
-    Score a complete submission with multiple events
+    Main scoring entry point
     
     Args:
-        sub: Normalized submission from user
-        gt: Ground truth for the question
-        cfg: Configuration object
-        
+        submission: Normalized user submission
+        ground_truth: Ground truth data
+        t_submit: Submission time (seconds since question started)
+        k: Number of wrong submissions before this
+        params: Scoring parameters
+    
     Returns:
-        Tuple of (final_score, detail_dict)
-        detail_dict contains:
-            - per_event_scores: List of scores for each event
-            - gt_events: List of ground truth event pairs
-            - user_values: List of user submitted values
-            - aggregation_method: Method used to aggregate scores
+        Scoring result dictionary
     """
-    # Convert ground truth points to events
-    gt_events = points_to_events(gt.points)
-    user_values = sub.values
+    # Parse GT events from points
+    gt_events = points_to_events(ground_truth.points)
     
-    per_event_scores = []
+    # Check exact match
+    matched, total = check_exact_match(submission.values, gt_events)
     
-    # Score each event in order
-    for idx, gt_evt in enumerate(gt_events):
-        gt_start, gt_end = gt_evt
-        
-        # Check if user submitted this event
-        if idx < len(user_values):
-            user_val = user_values[idx]
-        else:
-            # User didn't submit this event -> 0 score
-            per_event_scores.append(0.0)
-            continue
-        
-        # Score based on task type
-        if sub.qtype in ("KIS", "QA"):
-            # KIS/QA use milliseconds
-            s = score_event_ms(user_val, gt_start, gt_end, cfg)
-        else:  # TR
-            # TR uses frame_id
-            s = score_event_frame(user_val, gt_start, gt_end, cfg)
-        
-        per_event_scores.append(s)
+    # Calculate final score
+    result = calculate_final_score(
+        matched=matched,
+        total=total,
+        task_type=ground_truth.type,
+        t_submit=t_submit,
+        k=k,
+        params=params
+    )
     
-    # Aggregate scores based on configuration
-    if not per_event_scores:
-        final_score = 0.0
-    elif cfg.aggregation == "mean":
-        final_score = sum(per_event_scores) / len(per_event_scores)
-    elif cfg.aggregation == "sum":
-        final_score = sum(per_event_scores)
-    elif cfg.aggregation == "min":
-        final_score = min(per_event_scores)
-    else:
-        # Default to mean
-        final_score = sum(per_event_scores) / len(per_event_scores)
-    
-    detail = {
-        "per_event_scores": per_event_scores,
-        "gt_events": gt_events,
-        "user_values": user_values,
-        "aggregation_method": cfg.aggregation,
-        "num_gt_events": len(gt_events),
-        "num_user_events": len(user_values)
-    }
-    
-    return final_score, detail
+    return result
