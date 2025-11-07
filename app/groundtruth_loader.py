@@ -12,7 +12,7 @@ def load_groundtruth(csv_path: str) -> Dict[int, GroundTruth]:
     Load ground truth from CSV file
     
     CSV format:
-        stt,type,scene_id,video_id,points
+        id,type,scene_id,video_id,points
         1,KIS,L26,V017,4890,5000,5001,5020
         2,QA,K01,V021,12000,12345
         3,TR,L26,V017,240,252,300,312
@@ -21,7 +21,7 @@ def load_groundtruth(csv_path: str) -> Dict[int, GroundTruth]:
         csv_path: Path to CSV file
         
     Returns:
-        Dictionary mapping question ID (stt) to GroundTruth
+        Dictionary mapping question ID to GroundTruth
         
     Raises:
         FileNotFoundError: If CSV file not found
@@ -38,7 +38,7 @@ def load_groundtruth(csv_path: str) -> Dict[int, GroundTruth]:
         reader = csv.DictReader(f)
         
         for row in reader:
-            stt = int(row['stt'])
+            qid = int(row['id'])
             qtype = row['type'].strip().upper()
             scene_id = row['scene_id'].strip()
             video_id = row['video_id'].strip()
@@ -50,24 +50,24 @@ def load_groundtruth(csv_path: str) -> Dict[int, GroundTruth]:
             # Validate even number of points
             if len(points) % 2 != 0:
                 raise ValueError(
-                    f"Question {stt}: points count must be even, got {len(points)}"
+                    f"Question {qid}: points count must be even, got {len(points)}"
                 )
             
             # Validate points are sorted
             if points != sorted(points):
                 raise ValueError(
-                    f"Question {stt}: points must be sorted in ascending order"
+                    f"Question {qid}: points must be sorted in ascending order"
                 )
             
             gt = GroundTruth(
-                stt=stt,
+                stt=qid,
                 type=qtype,
                 scene_id=scene_id,
                 video_id=video_id,
                 points=points
             )
             
-            gt_table[stt] = gt
+            gt_table[qid] = gt
     
     if not gt_table:
         raise ValueError(f"No ground truth data loaded from {csv_path}")

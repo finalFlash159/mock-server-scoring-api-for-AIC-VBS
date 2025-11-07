@@ -48,7 +48,7 @@ curl http://localhost:8000/config
 File `data/groundtruth.csv`:
 
 ```csv
-stt,type,scene_id,video_id,points
+id,type,scene_id,video_id,points
 1,TR,L26,V017,"4890,5000,5001,5020"
 2,KIS,L26,V017,"4890,5000,5001,5020"
 3,QA,K01,V021,"12000,12345"
