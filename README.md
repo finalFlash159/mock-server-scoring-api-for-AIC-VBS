@@ -49,20 +49,20 @@ File `data/groundtruth.csv`:
 
 ```csv
 id,type,scene_id,video_id,points
-1,TR,L26,V017,"4890,5000,5001,5020"
-2,KIS,L26,V017,"4890,5000,5001,5020"
-3,QA,K01,V021,"12000,12345"
+1,TR,L26,V017,"4890-5000-5001-5020"
+2,KIS,L26,V017,"4890-5000-5001-5020"
+3,QA,K01,V021,"12000-12345"
 ```
 
 **Rules:**
-- `points`: Comma-separated integers, **count must be even**
+- `points`: Dash-separated integers (`-`), **count must be even**
 - Each pair of numbers = 1 event: `[start, end]`
 - KIS/QA: points = milliseconds (ms)
 - TR: points = frame_id
 - Points must be sorted in **ascending order**
 
 **Example:**
-- `4890,5000,5001,5020` → 2 events: [4890,5000] and [5001,5020]
+- `4890-5000-5001-5020` → 2 events: [4890,5000] and [5001,5020]
 
 ## Switching Questions
 

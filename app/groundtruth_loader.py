@@ -43,9 +43,9 @@ def load_groundtruth(csv_path: str) -> Dict[int, GroundTruth]:
             scene_id = row['scene_id'].strip()
             video_id = row['video_id'].strip()
             
-            # Parse points - all remaining columns are point values
+            # Parse points - delimiter changed from comma to dash
             points_str = row['points'].strip()
-            points = [int(p.strip()) for p in points_str.split(',') if p.strip()]
+            points = [int(p.strip()) for p in points_str.split('-') if p.strip()]
             
             # Validate even number of points
             if len(points) % 2 != 0:
