@@ -1,194 +1,201 @@
 """
-Unit tests for scoring functions
+Tests for AIC 2025 Competition Scoring
 """
 import pytest
-from app.models import Config, GroundTruth, NormalizedSubmission
-from app.scoring import score_event_ms, score_event_frame, score_submission
-from app.utils import points_to_events
+from app.scoring import (
+    calculate_time_factor,
+    check_exact_match,
+    calculate_correctness_factor,
+    calculate_final_score
+)
+from app.models import ScoringParams
 
 
-@pytest.fixture
-def config():
-    """Default test configuration"""
-    return Config(
-        active_question_id=1,
-        fps=25.0,
-        max_score=100.0,
-        frame_tolerance=12.0,
-        decay_per_frame=1.0,
-        aggregation="mean"
-    )
+def test_time_factor_start():
+    """Time factor at t=0 should be 1.0"""
+    assert calculate_time_factor(0, 300) == 1.0
 
 
-def test_points_to_events():
-    """Test converting points to event pairs"""
-    points = [4890, 5000, 5001, 5020]
-    events = points_to_events(points)
-    assert events == [(4890, 5000), (5001, 5020)]
-    
-    points = [100, 200]
-    events = points_to_events(points)
-    assert events == [(100, 200)]
+def test_time_factor_half():
+    """Time factor at t=150s (half) should be 0.5"""
+    assert calculate_time_factor(150, 300) == 0.5
 
 
-def test_score_event_ms_perfect(config):
-    """Test scoring with perfect submission (ms)"""
-    # Event: 4890-5000, midpoint = 4945
-    # User submits exactly 4945
-    score = score_event_ms(4945, 4890, 5000, config)
-    assert score == 100.0
+def test_time_factor_end():
+    """Time factor at t=300s (end) should be 0.0"""
+    assert calculate_time_factor(300, 300) == 0.0
 
 
-def test_score_event_ms_close(config):
-    """Test scoring with close submission (ms)"""
-    # Event: 4890-5000, midpoint = 4945
-    # User submits 4999, distance = 54ms = 1.35 frames
-    # Score = 100 - 1.35 * 1.0 = 98.65
-    score = score_event_ms(4999, 4890, 5000, config)
-    assert 98.0 < score < 99.0
+def test_time_factor_exceeded():
+    """Time factor past time limit should be 0.0"""
+    assert calculate_time_factor(350, 300) == 0.0
 
 
-def test_score_event_ms_out_of_tolerance(config):
-    """Test scoring beyond tolerance (ms)"""
-    # Event: 4890-5000, midpoint = 4945
-    # User submits 5500, distance = 555ms = 13.875 frames > 12
-    score = score_event_ms(5500, 4890, 5000, config)
-    assert score == 0.0
+def test_exact_match_perfect():
+    """Perfect exact match: all events matched"""
+    user = [4890, 5000]
+    events = [(4890, 5000)]
+    matched, total = check_exact_match(user, events)
+    assert matched == 1
+    assert total == 1
 
 
-def test_score_event_frame_perfect(config):
-    """Test scoring with perfect submission (frame)"""
-    # Event: 240-252, midpoint = 246
-    score = score_event_frame(246, 240, 252, config)
-    assert score == 100.0
+def test_exact_match_partial():
+    """Partial match: only 1 of 2 events"""
+    user = [4890, 5000]
+    events = [(4890, 5000), (5001, 5020)]
+    matched, total = check_exact_match(user, events)
+    assert matched == 1
+    assert total == 2
 
 
-def test_score_event_frame_close(config):
-    """Test scoring with close submission (frame)"""
-    # Event: 240-252, midpoint = 246
-    # User submits 250, distance = 4 frames
-    # Score = 100 - 4 * 1.0 = 96.0
-    score = score_event_frame(250, 240, 252, config)
-    assert score == 96.0
+def test_exact_match_no_match():
+    """No match: different values"""
+    user = [1000, 2000]
+    events = [(4890, 5000)]
+    matched, total = check_exact_match(user, events)
+    assert matched == 0
+    assert total == 1
 
 
-def test_score_submission_tr_two_events(config):
-    """Test TR submission with 2 events"""
-    gt = GroundTruth(
-        stt=1,
-        type="TR",
-        scene_id="L26",
-        video_id="V017",
-        points=[4890, 5000, 5001, 5020]  # 2 events
-    )
-    
-    sub = NormalizedSubmission(
-        question_id=1,
-        qtype="TR",
-        video_id="V017",
-        values=[4999, 5049]  # User submits 2 events
-    )
-    
-    final_score, detail = score_submission(sub, gt, config)
-    
-    # Should have 2 event scores
-    assert len(detail["per_event_scores"]) == 2
-    assert detail["num_gt_events"] == 2
-    assert detail["num_user_events"] == 2
-    
-    # Check event 1: GT=[4890,5000], mid=4945, range=[4878,5012]
-    # user=4999 in range, dist=54 frames -> score = 100-54 = 46
-    assert detail["per_event_scores"][0] == 46.0
-    
-    # Check event 2: GT=[5001,5020], mid=5010.5, range=[4989,5032]
-    # user=5049 > 5032 (outside range) -> 0
-    assert detail["per_event_scores"][1] == 0.0
-    
-    # Mean of [46, 0] = 23
-    assert final_score == 23.0
+def test_exact_match_multiple_values_one_event():
+    """Multiple user values matching same event"""
+    user = [4890, 5000]  # Both match event
+    events = [(4890, 5000)]
+    matched, total = check_exact_match(user, events)
+    assert matched == 1  # Still counts as 1 event matched
+    assert total == 1
 
 
-def test_score_submission_kis_missing_event(config):
-    """Test KIS submission with missing event"""
-    gt = GroundTruth(
-        stt=2,
-        type="KIS",
-        scene_id="L26",
-        video_id="V017",
-        points=[4890, 5000, 5001, 5020]  # 2 events
-    )
-    
-    sub = NormalizedSubmission(
-        question_id=2,
-        qtype="KIS",
-        video_id="V017",
-        values=[4945]  # User only submits 1 event
-    )
-    
-    final_score, detail = score_submission(sub, gt, config)
-    
-    # Should have 2 event scores (second is 0)
-    assert len(detail["per_event_scores"]) == 2
-    assert detail["per_event_scores"][0] == 100.0  # Perfect
-    assert detail["per_event_scores"][1] == 0.0    # Missing
-    
-    # Mean of [100, 0] = 50
-    assert final_score == 50.0
+def test_correctness_kis_full():
+    """KIS: 100% correct → factor 1.0"""
+    factor = calculate_correctness_factor(2, 2, "KIS")
+    assert factor == 1.0
 
 
-def test_score_submission_aggregation_min(config):
-    """Test min aggregation"""
-    config.aggregation = "min"
-    
-    gt = GroundTruth(
-        stt=1,
-        type="KIS",
-        scene_id="L26",
-        video_id="V017",
-        points=[4890, 5000, 5001, 5020]
-    )
-    
-    sub = NormalizedSubmission(
-        question_id=1,
-        qtype="KIS",
-        video_id="V017",
-        values=[4945, 5010]  # Perfect scores
-    )
-    
-    final_score, detail = score_submission(sub, gt, config)
-    
-    # Both events should be ~100
-    assert detail["per_event_scores"][0] == 100.0
-    assert 99.0 < detail["per_event_scores"][1] <= 100.0
-    
-    # Min should be close to 100
-    assert 99.0 < final_score <= 100.0
+def test_correctness_kis_partial():
+    """KIS: 50% correct → factor 0.0 (no score)"""
+    factor = calculate_correctness_factor(1, 2, "KIS")
+    assert factor == 0.0
 
 
-def test_score_submission_aggregation_sum(config):
-    """Test sum aggregation"""
-    config.aggregation = "sum"
-    
-    gt = GroundTruth(
-        stt=1,
-        type="KIS",
-        scene_id="L26",
-        video_id="V017",
-        points=[4890, 5000, 5001, 5020]
-    )
-    
-    sub = NormalizedSubmission(
-        question_id=1,
-        qtype="KIS",
-        video_id="V017",
-        values=[4945, 5010]
-    )
-    
-    final_score, detail = score_submission(sub, gt, config)
-    
-    # Sum of 2 ~100 scores should be ~200
-    assert 190.0 < final_score <= 200.0
+def test_correctness_qa_full():
+    """QA: 100% correct → factor 1.0"""
+    factor = calculate_correctness_factor(1, 1, "QA")
+    assert factor == 1.0
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+def test_correctness_qa_partial():
+    """QA: 50% correct → factor 0.0 (no score)"""
+    factor = calculate_correctness_factor(1, 2, "QA")
+    assert factor == 0.0
+
+
+def test_correctness_trake_full():
+    """TRAKE: 100% → factor 1.0"""
+    factor = calculate_correctness_factor(2, 2, "TR")
+    assert factor == 1.0
+
+
+def test_correctness_trake_partial_high():
+    """TRAKE: 50-99% → factor 0.5"""
+    factor = calculate_correctness_factor(1, 2, "TR")
+    assert factor == 0.5
+
+
+def test_correctness_trake_partial_75():
+    """TRAKE: 75% (3/4) → factor 0.5"""
+    factor = calculate_correctness_factor(3, 4, "TR")
+    assert factor == 0.5
+
+
+def test_correctness_trake_low():
+    """TRAKE: <50% → factor 0.0"""
+    factor = calculate_correctness_factor(1, 3, "TR")
+    assert factor == 0.0
+
+
+def test_final_score_perfect():
+    """Perfect submission: t=0, k=0, 100% correct"""
+    params = ScoringParams()
+    result = calculate_final_score(2, 2, "KIS", 0, 0, params)
+    assert result["score"] == 100.0
+    assert result["penalty"] == 0
+    assert result["correctness_factor"] == 1.0
+    assert result["time_factor"] == 1.0
+
+
+def test_final_score_with_penalty():
+    """Score with penalty: k=2, perfect timing and correctness"""
+    params = ScoringParams()
+    result = calculate_final_score(2, 2, "KIS", 0, 2, params)
+    # base_score = 100, penalty = 20, final = 80
+    assert result["score"] == 80.0
+    assert result["penalty"] == 20.0
+
+
+def test_final_score_with_time():
+    """Score with time factor: t=150s (half)"""
+    params = ScoringParams()
+    result = calculate_final_score(2, 2, "KIS", 150, 0, params)
+    # fT = 0.5, base = 50 + (100-50)*0.5 = 75
+    assert result["score"] == 75.0
+    assert result["time_factor"] == 0.5
+
+
+def test_final_score_trake_partial():
+    """TRAKE partial: 50% correct, score halved"""
+    params = ScoringParams()
+    result = calculate_final_score(1, 2, "TR", 0, 0, params)
+    # base = 100, correctness = 0.5, final = 50
+    assert result["score"] == 50.0
+    assert result["correctness_factor"] == 0.5
+
+
+def test_final_score_time_and_penalty():
+    """Combined: time factor + penalty"""
+    params = ScoringParams()
+    result = calculate_final_score(2, 2, "KIS", 150, 1, params)
+    # fT=0.5, base=75, penalty=10, final=65
+    assert result["score"] == 65.0
+    assert result["penalty"] == 10.0
+    assert result["time_factor"] == 0.5
+
+
+def test_final_score_kis_incorrect():
+    """KIS: Partial match → 0 score"""
+    params = ScoringParams()
+    result = calculate_final_score(1, 2, "KIS", 0, 0, params)
+    assert result["score"] == 0.0
+    assert result["correctness_factor"] == 0.0
+
+
+def test_final_score_high_penalty():
+    """Very high penalty can bring score to 0"""
+    params = ScoringParams()
+    result = calculate_final_score(2, 2, "KIS", 0, 15, params)
+    # base = 100, penalty = 150, max(0, 100-150) = 0
+    assert result["score"] == 0.0
+
+
+def test_final_score_trake_with_time_and_penalty():
+    """TRAKE partial with time and penalty"""
+    params = ScoringParams()
+    result = calculate_final_score(2, 3, "TR", 100, 1, params)
+    # fT = 1 - 100/300 = 0.6667
+    # base = 50 + 50*0.6667 = 83.33
+    # penalty = 10
+    # score_before = 73.33
+    # correctness = 0.5 (2/3 = 66% → 50-99%)
+    # final = 73.33 * 0.5 = 36.67
+    assert 36 <= result["score"] <= 37
+    assert result["correctness_factor"] == 0.5
+
+
+def test_final_score_at_time_limit():
+    """At time limit, time factor = 0, base score = p_base"""
+    params = ScoringParams()
+    result = calculate_final_score(2, 2, "KIS", 300, 0, params)
+    # fT = 0, base = 50 + 50*0 = 50
+    assert result["score"] == 50.0
+    assert result["time_factor"] == 0.0
