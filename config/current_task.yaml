@@ -1,8 +1,17 @@
 # Configuration for active question and scoring parameters
 
-active_question_id: 2
+active_question_id: 1
+
+# AIC 2025 Competition Scoring Parameters
+p_max: 100.0          # Maximum score
+p_base: 50.0          # Base score at time limit
+p_penalty: 10.0       # Penalty per wrong submission
+time_limit: 300       # Time limit in seconds (5 minutes)
+buffer_time: 10       # Buffer for network delay (±10s)
+
+# Deprecated (kept for backward compatibility, not used in new scoring)
 fps: 25.0
 max_score: 100.0
 frame_tolerance: 12.0
 decay_per_frame: 1.0
-aggregation: "mean"  # Options: "mean", "min", "sum"
+aggregation: "mean"
