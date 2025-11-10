@@ -62,8 +62,12 @@ def normalize_kis(body: Dict, question_id: int) -> NormalizedSubmission:
         # Use start time as the submission value (ms)
         start = answer.get("start", "")
         if start:
-            # Handle both string and int types
-            values.append(int(start) if isinstance(start, int) else int(str(start).strip()))
+            # Handle int, float, and string types
+            if isinstance(start, (int, float)):
+                values.append(int(start))  # Convert float to int directly
+            else:
+                # String: may contain decimals, convert via float first
+                values.append(int(float(str(start).strip())))
     
     if not scene_id or not video_id:
         raise ValueError("No valid mediaItemName (SCENE_ID_VIDEO_ID) found in KIS answers")
@@ -95,19 +99,26 @@ def normalize_qa(body: Dict, question_id: int) -> NormalizedSubmission:
     {
         "answerSets": [{
             "answers": [
-                { "text": "QA-ANSWER1-L26_V017-4999,5049" }
+                { "text": "QA-MOCCHAU-L26_V017-4999,5049" }
             ]
         }]
     }
     
     Text format: QA-<ANSWER>-<SCENE_ID>_<VIDEO_ID>-<MS1>,<MS2>,...
     
+    Rules for answer (STRICT - no normalization):
+    - Must be UPPERCASE (all caps)
+    - No accents (diacritics)
+    - No spaces
+    - Example: Must send "MOCCHAU" (NOT "Mộc Châu" or "Moc Chau")
+    - Answer is checked as-is without any formatting
+    
     Args:
         body: Request body JSON
         question_id: Question ID
         
     Returns:
-        NormalizedSubmission with values as list of ms
+        NormalizedSubmission with values as list of ms and answer text (as-is)
     """
     answers = body.get("answerSets", [{}])[0].get("answers", [])
     
@@ -117,6 +128,7 @@ def normalize_qa(body: Dict, question_id: int) -> NormalizedSubmission:
     values = []
     scene_id = None
     video_id = None
+    answer_text = None
     
     # Pattern: QA-<ANSWER>-<SCENE_ID>_<VIDEO_ID>-<TIME(s)>
     # Answer can be any text, times can be comma-separated
@@ -129,10 +141,14 @@ def normalize_qa(body: Dict, question_id: int) -> NormalizedSubmission:
         if not match:
             raise ValueError(f"Invalid QA answer format. Expected: QA-<ANSWER>-<SCENE_ID>_<VIDEO_ID>-<MS>, got: {text}")
         
-        answer_text = match.group(1)  # The answer part (e.g., "ANSWER1", "MyAnswer")
+        ans_text = match.group(1)  # The answer part - NO NORMALIZATION, keep as-is
         sid = match.group(2)
         vid = match.group(3)
         times_str = match.group(4)
+        
+        # Store first answer text (as-is, no modification)
+        if answer_text is None:
+            answer_text = ans_text  # Keep exactly as user sent
         
         # Get scene_id and video_id from first answer
         if scene_id is None:
@@ -157,7 +173,8 @@ def normalize_qa(body: Dict, question_id: int) -> NormalizedSubmission:
         qtype="QA",
         scene_id=scene_id,
         video_id=video_id,
-        values=values
+        values=values,
+        answer=answer_text
     )
 
 

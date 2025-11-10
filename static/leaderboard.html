@@ -9,7 +9,7 @@
 <body>
     <div class="container">
         <header>
-            <h1>🏆 AIC 2025 - Leaderboard</h1>
+            <h1>AIC 2025 - Leaderboard</h1>
             <div class="header-right">
                 <div class="active-question" id="active-question-indicator">
                     <!-- Active question indicator -->
@@ -24,10 +24,10 @@
         <!-- Tab Navigation -->
         <div class="tabs">
             <button class="tab-button active" data-tab="realtime" onclick="switchTab('realtime')">
-                ⚡ Real-time
+                Real-time
             </button>
             <button class="tab-button" data-tab="overall" onclick="switchTab('overall')">
-                📊 Overall Standings
+                Overall Standings
             </button>
         </div>
         
@@ -47,7 +47,7 @@
                         <tr class="header-row-1">
                             <th rowspan="2" class="rank-col">Rank</th>
                             <th rowspan="2" class="team-col">Team</th>
-                            <th colspan="5" class="questions-header">Questions</th>
+                            <th colspan="22" class="questions-header">Questions</th>
                             <th rowspan="2" class="total-col">Total</th>
                         </tr>
                         <tr class="header-row-2" id="overall-question-headers">
@@ -57,33 +57,12 @@
                     <tbody id="overall-body">
                         <!-- Team rows will be inserted here by JavaScript -->
                         <tr>
-                            <td colspan="8" class="loading">Loading...</td>
+                            <td colspan="25" class="loading">Loading...</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
         </div>
-        
-        <footer class="legend">
-            <div class="legend-item">
-                <span class="icon correct">✅</span>
-                <span>Correct Submission</span>
-            </div>
-            <div class="legend-item">
-                <span class="icon wrong">❌</span>
-                <span>Wrong Submission</span>
-            </div>
-            <div class="legend-item">
-                <span class="badge real-team-badge">⭐</span>
-                <span>Your Team (0THING2LOSE)</span>
-            </div>
-            <div class="legend-item">
-                <span class="score-demo score-high">High</span>
-                <span class="score-demo score-good">Good</span>
-                <span class="score-demo score-medium">Medium</span>
-                <span class="score-demo score-low">Low</span>
-            </div>
-        </footer>
     </div>
     
     <script src="/static/leaderboard.js"></script>

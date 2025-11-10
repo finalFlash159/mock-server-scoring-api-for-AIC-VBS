@@ -12,10 +12,10 @@ def load_groundtruth(csv_path: str) -> Dict[int, GroundTruth]:
     Load ground truth from CSV file
     
     CSV format:
-        id,type,scene_id,video_id,points
-        1,KIS,L26,V017,4890,5000,5001,5020
-        2,QA,K01,V021,12000,12345
-        3,TR,L26,V017,240,252,300,312
+        id,type,scene_id,video_id,points,answer
+        1,KIS,L26,V017,4890,5000,5001,5020,
+        2,QA,K01,V021,12000,12345,MOCCHAU
+        3,TR,L26,V017,240,252,300,312,
     
     Args:
         csv_path: Path to CSV file
@@ -68,12 +68,18 @@ def load_groundtruth(csv_path: str) -> Dict[int, GroundTruth]:
                     f"Question {qid}: points must be sorted in ascending order"
                 )
             
+            # Parse answer for QA (optional)
+            answer = None
+            if 'answer' in row and row['answer']:
+                answer = row['answer'].strip()
+            
             gt = GroundTruth(
                 stt=qid,
                 type=qtype,
                 scene_id=scene_id,
                 video_id=video_id,
-                points=points
+                points=points,
+                answer=answer
             )
             
             gt_table[qid] = gt

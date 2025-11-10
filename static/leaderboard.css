@@ -7,9 +7,9 @@
     --text-secondary: #ffffff;
     --border-color: #333333;
     
-    /* Only 3 colors: Black, Red, Green, White */
-    --color-correct: #00ff00;   /* Green for correct/high score */
-    --color-wrong: #ff0000;     /* Red for wrong/low score */
+    /* Even softer colors - further reduced neon */
+    --color-correct: #00aa00;   /* Even softer green */
+    --color-wrong: #aa0000;     /* Even softer red */
     --color-neutral: #666666;   /* Gray for no data */
 }
 
@@ -225,10 +225,6 @@ header h1 {
     background: var(--bg-secondary);
 }
 
-.team-card.real-team .team-name::before {
-    content: "⭐ ";
-}
-
 /* Remove old card styling */
 .team-card.score-high,
 .team-card.score-good,
@@ -330,13 +326,9 @@ header h1 {
     display: flex;
     justify-content: center;
     align-items: center;
-    gap: 3px;
-    font-size: 1rem;
+    gap: 5px;
+    font-size: 0.95rem;
     margin-bottom: 5px;
-}
-
-.submissions .icon {
-    font-size: 1.1rem;
 }
 
 .score-value {
@@ -344,11 +336,16 @@ header h1 {
     font-size: 1.1rem;
 }
 
-/* Score colors in table - Only Red or Green */
-.score-value.score-high { color: var(--color-correct); }
-.score-value.score-good { color: var(--color-correct); }
-.score-value.score-medium { color: var(--color-wrong); }
-.score-value.score-low { color: var(--color-wrong); }
+/* Score colors - Only 2 colors: Green (has score) or Red (no score) */
+.score-value.score-green,
+.score-green { 
+    color: var(--color-correct); 
+}
+
+.score-value.score-red,
+.score-red { 
+    color: var(--color-wrong); 
+}
 
 /* ===== FOOTER / LEGEND ===== */
 footer.legend {
@@ -372,16 +369,6 @@ footer.legend {
     color: var(--text-primary);
 }
 
-.legend-item .icon {
-    font-size: 1.2rem;
-}
-
-.legend-item .badge {
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-weight: 600;
-}
-
 .real-team-badge {
     background: var(--color-correct);
     color: #000;
@@ -390,17 +377,15 @@ footer.legend {
     font-weight: 600;
 }
 
-.score-demo {
-    padding: 4px 12px;
-    border-radius: 4px;
+.correct-count {
+    color: var(--color-correct);
     font-weight: 600;
-    margin: 0 5px;
 }
 
-.score-high { background: var(--color-correct); color: #000; }
-.score-good { background: var(--color-correct); color: #000; }
-.score-medium { background: var(--color-wrong); color: #fff; }
-.score-low { background: var(--color-wrong); color: #fff; }
+.wrong-count {
+    color: var(--color-wrong);
+    font-weight: 600;
+}
 
 /* ===== RESPONSIVE ===== */
 @media (max-width: 768px) {
@@ -435,10 +420,6 @@ footer.legend {
     color: var(--text-primary);
     font-size: 1.1rem;
 }
-
-/* ===== ICONS ===== */
-.icon.correct { color: var(--color-correct); }
-.icon.wrong { color: var(--color-wrong); }
 
 /* ===== ANIMATIONS ===== */
 @keyframes slideIn {

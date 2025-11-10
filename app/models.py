@@ -12,6 +12,7 @@ class GroundTruth(BaseModel):
     scene_id: str
     video_id: str
     points: List[int]  # sorted ascending, must have even number of elements
+    answer: Optional[str] = None  # For QA: correct answer (uppercase, no accents, no spaces)
 
 
 class NormalizedSubmission(BaseModel):
@@ -21,23 +22,23 @@ class NormalizedSubmission(BaseModel):
     scene_id: str
     video_id: str
     values: List[int]  # KIS/QA: ms, TR: frame_id
+    answer: Optional[str] = None  # For QA: user's answer text
 
 
 class Config(BaseModel):
-    """Configuration for scoring (deprecated fields kept for backward compatibility)"""
+    """
+    Configuration for scoring
+    
+    DEPRECATED: Most fields moved to ScoringParams.
+    This model is kept for backward compatibility with /config endpoint only.
+    """
     active_question_id: int
-    # New competition parameters
+    # Competition parameters (use ScoringParams in new code)
     p_max: float = 100.0
     p_base: float = 50.0
     p_penalty: float = 10.0
     time_limit: int = 300
     buffer_time: int = 10
-    # Deprecated (kept for backward compatibility)
-    fps: float = 25.0
-    max_score: float = 100.0
-    frame_tolerance: float = 12.0
-    decay_per_frame: float = 1.0
-    aggregation: str = "mean"  # "mean" | "min" | "sum"
 
 
 class ScoringParams(BaseModel):

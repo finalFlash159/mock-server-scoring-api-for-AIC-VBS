@@ -123,3 +123,16 @@ def generate_random_submit_time(time_limit: float) -> float:
         return random.uniform(time_limit * 0.50, time_limit * 0.75)
     else:  # 5% submit in last quarter
         return random.uniform(time_limit * 0.75, time_limit)
+
+
+def generate_submit_delay() -> float:
+    """
+    Generate random delay before fake team submits
+    
+    Delay range: 15 seconds to 4 minutes (240 seconds)
+    Distribution is uniform random
+    
+    Returns:
+        Delay in seconds (15-240)
+    """
+    return random.uniform(15, 240)

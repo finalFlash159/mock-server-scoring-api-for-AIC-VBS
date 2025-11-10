@@ -152,18 +152,6 @@ def check_match_with_tolerance(
     return matched_events, total_events, avg_quality
 
 
-def check_exact_match(user_values: List[int], gt_events: List[Tuple[int, int]]) -> Tuple[int, int]:
-    """
-    DEPRECATED: Use check_match_with_tolerance instead
-    
-    This function is kept for backward compatibility but now uses tolerance-based matching.
-    """
-    # Default tolerance based on typical use case
-    tolerance = TOLERANCE_MS  # Will be overridden by caller
-    matched, total, _ = check_match_with_tolerance(user_values, gt_events, tolerance)
-    return matched, total
-
-
 def calculate_correctness_factor(
     matched: int, 
     total: int, 
@@ -312,6 +300,40 @@ def score_submission(
             "penalty": k * params.p_penalty,
             "message": f"Wrong video/scene. Expected: {ground_truth.scene_id}_{ground_truth.video_id}, Got: {submission.scene_id}_{submission.video_id}"
         }
+    
+    # For QA: Check answer text first (must match to continue)
+    if ground_truth.type == "QA":
+        if ground_truth.answer:  # If groundtruth has answer
+            if not submission.answer:  # User didn't provide answer
+                return {
+                    "score": 0,
+                    "correctness_factor": 0.0,
+                    "match_quality": 0.0,
+                    "matched_events": 0,
+                    "total_events": len(ground_truth.points) // 2,
+                    "percentage": 0.0,
+                    "time_factor": 1 - (t_submit / params.time_limit),
+                    "elapsed_time": t_submit,
+                    "wrong_attempts": k,
+                    "penalty": k * params.p_penalty,
+                    "message": "QA answer text is required but not provided"
+                }
+            
+            # STRICT comparison - no normalization, exact match only
+            if submission.answer != ground_truth.answer:
+                return {
+                    "score": 0,
+                    "correctness_factor": 0.0,
+                    "match_quality": 0.0,
+                    "matched_events": 0,
+                    "total_events": len(ground_truth.points) // 2,
+                    "percentage": 0.0,
+                    "time_factor": 1 - (t_submit / params.time_limit),
+                    "elapsed_time": t_submit,
+                    "wrong_attempts": k,
+                    "penalty": k * params.p_penalty,
+                    "message": f"Wrong QA answer. Expected: {ground_truth.answer}, Got: {submission.answer}"
+                }
     
     # Determine tolerance based on task type
     if ground_truth.type == "TR":

@@ -138,11 +138,14 @@ function createTeamCard(team, questionId, isReal) {
         wrongCount = questionData.wrong_count || 0;
     }
     
+    // Determine color: green if has score, red if no score
+    const scoreClass = score > 0 ? 'score-green' : 'score-red';
+    
     return `
         <div class="team-card ${isReal ? 'real-team' : ''}">
             <div class="team-info">
                 <div class="team-name">${team.team_name}</div>
-                <div class="score">${score.toFixed(1)}</div>
+                <div class="score ${scoreClass}">${score.toFixed(1)}</div>
             </div>
             <div class="team-stats">
                 <div class="stat-correct">${correctCount}</div>
@@ -172,13 +175,22 @@ function renderOverallView(data) {
         rowsHTML += createTeamRow(team, rank, data.questions, isRealTeam);
     });
     
-    tbody.innerHTML = rowsHTML || '<tr><td colspan="8" class="loading">No data</td></tr>';
+    // Total columns: Rank(1) + Team(1) + Questions(N) + Total(1) = N+3
+    const totalCols = data.questions.length + 3;
+    tbody.innerHTML = rowsHTML || `<tr><td colspan="${totalCols}" class="loading">No data</td></tr>`;
 }
 
 /**
  * Update question headers in overall table
  */
 function updateQuestionHeaders(questions) {
+    // Update colspan for "QUESTIONS" header
+    const questionsHeader = document.querySelector('.questions-header');
+    if (questionsHeader) {
+        questionsHeader.setAttribute('colspan', questions.length);
+    }
+    
+    // Update question column headers (Q1, Q2, Q3, ...)
     const headerRow = document.getElementById('overall-question-headers');
     headerRow.innerHTML = questions.map(q => `<th class="question-col">Q${q}</th>`).join('');
 }
@@ -187,20 +199,20 @@ function updateQuestionHeaders(questions) {
  * Create a team row for overall table
  */
 function createTeamRow(team, rank, questions, isRealTeam) {
-    const rankBadge = getRankBadge(rank);
+    const rankBadge = rank;  // Simple number, no medals
     const teamClass = isRealTeam ? 'real-team-row' : '';
-    const teamDisplay = isRealTeam ? `⭐ ${team.team_name}` : team.team_name;
+    const teamDisplay = team.team_name;  // No star icon
     
     // Build question cells
     let questionCells = '';
     questions.forEach(qId => {
         const qData = team.questions[qId];
         if (qData) {
-            const icons = renderIcons(qData.correct_count, qData.wrong_count);
-            const scoreClass = getScoreClass(qData.score);
+            const submissions = renderSubmissions(qData.correct_count, qData.wrong_count);
+            const scoreClass = qData.score > 0 ? 'score-green' : 'score-red';
             questionCells += `
                 <td class="question-cell">
-                    <div class="submissions">${icons}</div>
+                    <div class="submissions">${submissions}</div>
                     <div class="score-value ${scoreClass}">${qData.score.toFixed(1)}</div>
                 </td>
             `;
@@ -209,54 +221,24 @@ function createTeamRow(team, rank, questions, isRealTeam) {
         }
     });
     
+    const totalScoreClass = team.total_score > 0 ? 'score-green' : 'score-red';
+    
     return `
         <tr class="${teamClass}">
             <td>${rankBadge}</td>
             <td style="text-align: left;">${teamDisplay}</td>
             ${questionCells}
-            <td class="score-value ${getScoreClass(team.total_score)}">${team.total_score.toFixed(1)}</td>
+            <td class="score-value ${totalScoreClass}">${team.total_score.toFixed(1)}</td>
         </tr>
     `;
 }
 
 /**
- * Get rank badge HTML
+ * Render submission counts (simple text, no icons)
  */
-function getRankBadge(rank) {
-    if (rank === 1) return '<span class="rank-badge rank-1">🥇 1</span>';
-    if (rank === 2) return '<span class="rank-badge rank-2">🥈 2</span>';
-    if (rank === 3) return '<span class="rank-badge rank-3">🥉 3</span>';
-    return rank;
-}
-
-/**
- * Render submission icons (✅ and ❌)
- */
-function renderIcons(correctCount, wrongCount) {
-    let icons = '';
-    
-    // Add correct icons
-    for (let i = 0; i < correctCount; i++) {
-        icons += '<span class="icon correct">✅</span>';
-    }
-    
-    // Add wrong icons
-    for (let i = 0; i < wrongCount; i++) {
-        icons += '<span class="icon wrong">❌</span>';
-    }
-    
-    return icons || '-';
-}
-
-/**
- * Get CSS class based on score
- */
-function getScoreClass(score) {
-    if (score >= 90) return 'score-high';
-    if (score >= 70) return 'score-good';
-    if (score >= 50) return 'score-medium';
-    if (score > 0) return 'score-low';
-    return 'score-none';
+function renderSubmissions(correctCount, wrongCount) {
+    if (correctCount === 0 && wrongCount === 0) return '-';
+    return `<span class="correct-count">${correctCount}</span> / <span class="wrong-count">${wrongCount}</span>`;
 }
 
 /**

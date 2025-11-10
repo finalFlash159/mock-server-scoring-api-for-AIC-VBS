@@ -6,9 +6,8 @@ const COUNTDOWN_INTERVAL = 1000; // 1 second for smooth countdown
 const API = {
     START_QUESTION: '/admin/start-question',
     STOP_QUESTION: '/admin/stop-question',
-    RESET_ALL: '/admin/reset-all',
+    RESET_ALL: '/admin/reset',
     SESSIONS: '/admin/sessions',
-    QUESTION_STATUS: (id) => `/question/${id}/status`,
     CONFIG: '/config'
 };
 
@@ -94,7 +93,7 @@ function updateQuestionInfo() {
         Scene: ${q.scene_id} | Video: ${q.video_id}<br>
         Events: ${q.num_events || 0}<br>
         <hr style="margin: 10px 0; border-color: var(--border-color);">
-        ⏱️ Time Limit: <strong>${q.default_time_limit}s</strong> (+ ${q.default_buffer_time}s buffer)
+        Time Limit: <strong>${q.default_time_limit}s</strong> (+ ${q.default_buffer_time}s buffer)
     `;
 }
 
@@ -103,6 +102,8 @@ function updateQuestionInfo() {
  */
 async function startQuestion() {
     const questionId = parseInt(document.getElementById('question-id').value);
+    const timeLimit = parseInt(document.getElementById('time-limit').value) || 300;
+    const bufferTime = parseInt(document.getElementById('buffer-time').value) || 10;
     
     // Validate question ID exists in loaded config
     if (!questionId || !questionConfig[questionId]) {
@@ -110,16 +111,6 @@ async function startQuestion() {
         log(`Invalid question ID. Available: 1-${maxQ}`, 'error');
         return;
     }
-    
-    // Get time settings from question config (auto-detected)
-    const q = questionConfig[questionId];
-    if (!q) {
-        log('Question configuration not found. Please wait for config to load.', 'error');
-        return;
-    }
-    
-    const timeLimit = q.default_time_limit || 300;
-    const bufferTime = q.default_buffer_time || 10;
     
     try {
         const response = await fetch(API.START_QUESTION, {
@@ -135,15 +126,15 @@ async function startQuestion() {
         const data = await response.json();
         
         if (data.success) {
-            log(`✅ Started Question ${questionId} (${timeLimit}s + ${bufferTime}s buffer)`, 'success');
+            log(`Started Question ${questionId} (${timeLimit}s + ${bufferTime}s buffer)`, 'success');
             activeQuestionId = questionId;
             refreshStatus();
             refreshSessions();
         } else {
-            log(`❌ Failed to start question: ${data.message || 'Unknown error'}`, 'error');
+            log(`Failed to start question: ${data.message || 'Unknown error'}`, 'error');
         }
     } catch (error) {
-        log(`❌ Error starting question: ${error.message}`, 'error');
+        log(`Error starting question: ${error.message}`, 'error');
         console.error(error);
     }
 }
@@ -158,15 +149,13 @@ function startQuestionQuick(questionId) {
 }
 
 /**
- * Stop a question
+ * Stop the currently active question
  */
-async function stopQuestion() {
-    const questionId = parseInt(document.getElementById('stop-question-id').value);
+async function stopCurrentQuestion() {
+    const questionId = parseInt(document.getElementById('question-id').value);
     
-    // Validate question ID exists in loaded config
-    if (!questionId || !questionConfig[questionId]) {
-        const maxQ = Math.max(...Object.keys(questionConfig).map(Number));
-        log(`Invalid question ID. Available: 1-${maxQ}`, 'error');
+    if (!questionId) {
+        log('Please enter a question ID to stop', 'error');
         return;
     }
     
@@ -180,17 +169,17 @@ async function stopQuestion() {
         const data = await response.json();
         
         if (data.success) {
-            log(`⏹️ Stopped Question ${questionId}`, 'warning');
+            log(`Stopped Question ${questionId}`, 'warning');
             if (activeQuestionId === questionId) {
                 activeQuestionId = null;
             }
             refreshStatus();
             refreshSessions();
         } else {
-            log(`❌ Failed to stop question: ${data.message || 'Unknown error'}`, 'error');
+            log(`Failed to stop question: ${data.message || 'Unknown error'}`, 'error');
         }
     } catch (error) {
-        log(`❌ Error stopping question: ${error.message}`, 'error');
+        log(`Error stopping question: ${error.message}`, 'error');
         console.error(error);
     }
 }
@@ -229,43 +218,63 @@ async function resetAll() {
  * Refresh status panel
  */
 async function refreshStatus() {
-    if (!activeQuestionId) {
-        // No active question
+    try {
+        // Get all sessions
+        const response = await fetch(API.SESSIONS);
+        const data = await response.json();
+        
+        console.log('Sessions data:', data); // Debug log
+        
+        // Find active session
+        const activeSessions = data.sessions?.filter(s => s.is_active) || [];
+        
+        console.log('Active sessions:', activeSessions); // Debug log
+        
+        if (activeSessions.length === 0) {
+            // No active question
+            document.getElementById('active-question').textContent = 'None';
+            document.getElementById('active-question').classList.add('inactive');
+            document.getElementById('time-remaining').textContent = '-';
+            document.getElementById('time-remaining').classList.add('inactive');
+            document.getElementById('teams-submitted').textContent = '0';
+            document.getElementById('teams-completed').textContent = '0';
+            activeQuestionId = null;
+            remainingSeconds = 0;
+            return;
+        }
+        
+        // Get the most recent active session (should be only one)
+        const session = activeSessions[activeSessions.length - 1];
+        activeQuestionId = session.question_id;
+        
+        console.log('Active session:', session); // Debug log
+        
+        // Update status display
+        document.getElementById('active-question').textContent = `Question ${session.question_id}`;
+        document.getElementById('active-question').classList.remove('inactive');
+        
+        // Calculate remaining time
+        const elapsed = session.elapsed_time || 0;
+        const totalTime = (session.time_limit || 300) + (session.buffer_time || 10);
+        remainingSeconds = Math.max(0, Math.floor(totalTime - elapsed));
+        
+        console.log('Remaining seconds:', remainingSeconds); // Debug log
+        
+        updateCountdownDisplay();
+        document.getElementById('time-remaining').classList.remove('inactive');
+        
+        document.getElementById('teams-submitted').textContent = session.total_submissions || 0;
+        document.getElementById('teams-completed').textContent = session.completed_teams || 0;
+        
+    } catch (error) {
+        console.error('Error refreshing status:', error);
+        // Reset to no active question on error
         document.getElementById('active-question').textContent = 'None';
         document.getElementById('active-question').classList.add('inactive');
         document.getElementById('time-remaining').textContent = '-';
         document.getElementById('time-remaining').classList.add('inactive');
-        document.getElementById('teams-submitted').textContent = '0';
-        document.getElementById('teams-completed').textContent = '0';
+        activeQuestionId = null;
         remainingSeconds = 0;
-        return;
-    }
-    
-    try {
-        const response = await fetch(API.QUESTION_STATUS(activeQuestionId));
-        const data = await response.json();
-        
-        if (data.is_active) {
-            // Update status
-            document.getElementById('active-question').textContent = `Question ${data.question_id}`;
-            document.getElementById('active-question').classList.remove('inactive');
-            
-            // Update remaining seconds from server (sync every 2s)
-            remainingSeconds = Math.max(0, Math.floor(data.remaining_time));
-            updateCountdownDisplay();
-            document.getElementById('time-remaining').classList.remove('inactive');
-            
-            document.getElementById('teams-submitted').textContent = data.total_teams_submitted;
-            document.getElementById('teams-completed').textContent = data.completed_teams;
-            
-            // Auto-fill stop input
-            document.getElementById('stop-question-id').value = activeQuestionId;
-        } else {
-            activeQuestionId = null;
-            remainingSeconds = 0;
-        }
-    } catch (error) {
-        console.error('Error refreshing status:', error);
     }
 }
 

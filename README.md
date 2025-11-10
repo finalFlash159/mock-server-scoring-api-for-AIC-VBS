@@ -5,6 +5,7 @@ Mock scoring server for AIC 2025 supporting 3 task types: **KIS**, **QA**, **TR*
 ## Table of Contents
 
 - [Setup and Run](#setup-and-run)
+- [Project Structure](#project-structure)
 - [Competition Mode Overview](#competition-mode-overview)
 - [Admin Dashboard](#admin-dashboard)
 - [Real-time Leaderboard UI](#real-time-leaderboard-ui)
@@ -49,6 +50,53 @@ curl http://localhost:8000/
 
 # View current config
 curl http://localhost:8000/config
+```
+
+## Project Structure
+
+The project uses a **modular architecture** with clear separation of concerns:
+
+```
+app/
+├── main.py                    # FastAPI entry point (~100 lines)
+├── state.py                   # Global state (GT_TABLE)
+├── models.py                  # Pydantic data models
+├── utils.py                   # Utility functions
+│
+├── api/                       # API Layer - FastAPI routers
+│   ├── health.py             # Health check endpoint
+│   ├── admin.py              # Admin management (start/stop/reset)
+│   ├── submission.py         # Submit answers + list questions
+│   ├── leaderboard.py        # Leaderboard data + UI serving
+│   └── config.py             # Configuration endpoint
+│
+├── core/                      # Core Business Logic
+│   ├── groundtruth.py        # Load ground truth data
+│   ├── normalizer.py         # Normalize submissions (KIS/QA/TR)
+│   ├── scoring.py            # Score calculation with tolerance
+│   └── session.py            # Question session management
+│
+├── services/                  # Support Services
+│   ├── fake_teams.py         # Generate fake team data
+│   └── leaderboard.py        # Assemble leaderboard data
+│
+└── deprecated/                # Legacy Code
+    └── config.py             # Old config loader (to be phased out)
+```
+
+**Design Principles:**
+- **Layered Architecture:** API → Core → Services
+- **Single Responsibility:** Each module has one clear purpose
+- **Dependency Injection:** Shared state via `app.state` module
+- **Testability:** Business logic separated from API routes
+- **Scalability:** Easy to add new endpoints or features
+
+**Import Pattern:**
+```python
+from app import state                    # Global state
+from app.core.scoring import score_submission
+from app.core.session import start_question
+from app.services.fake_teams import generate_fake_teams
 ```
 
 ## Competition Mode Overview
@@ -571,11 +619,35 @@ server {
 Detailed documentation about system design, scoring logic, and architecture:
 
 - **[System Design](docs/system-design.md)** - Architecture, components, data flow
-- **[Scoring Logic](docs/scoring-logic.md)** - Detailed scoring algorithm
+- **[Scoring Logic](docs/scoring-logic.md)** - Detailed scoring algorithm with tolerance
+
+### Architecture Highlights
+
+**Modular Design:**
+- **5 API Routers** in `app/api/` - Clean separation of endpoints
+- **4 Core Modules** in `app/core/` - Business logic (scoring, normalization, session, groundtruth)
+- **2 Services** in `app/services/` - Support utilities (fake teams, leaderboard assembly)
+- **Global State** via `app.state.GT_TABLE` - Shared ground truth access
+
+**Key Features:**
+- ✅ Tolerance-based scoring (±2500ms for KIS/QA, ±12 frames for TR)
+- ✅ Distance-based match quality (linear decay from center to boundary)
+- ✅ Real team names (20 AIC 2025 teams)
+- ✅ Server auto-handles team_id and question_id
+- ✅ Admin web dashboard with countdown timer
+- ✅ Real-time leaderboard with grid + table views
+- ✅ QA answer validation (uppercase, no accents, no spaces)
 
 ## Testing
 
 ```bash
+# Run all tests
+pytest tests/ -v
+
+# Run specific test file
 pytest tests/test_scoring.py -v
+
+# Run with coverage
+pytest tests/ --cov=app --cov-report=html
 ```
 

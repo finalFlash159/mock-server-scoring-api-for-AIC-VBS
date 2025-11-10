@@ -1,83 +1,206 @@
-# System Design - AIC 2025 Scoring Server (Competition Mode + Leaderboard UI)
+# System Design - AIC 2025 Scoring Server (Modular Architecture)
 
 ## Architecture Overview
 
+The system uses a **layered modular architecture** with clear separation between API routes, business logic, and support services.
+
 ```mermaid
 graph TB
-    Admin[Admin] -->|Start/Stop| API[FastAPI Server]
+    Admin[Admin] -->|Start/Stop| API[API Layer]
     Team[Team] -->|Submit| API
     Browser[Browser] -->|View| UI[Leaderboard UI]
-    UI -->|Fetch| API
-    API -->|Manage| Session[Session Manager]
+    
+    API --> Health[health.py]
+    API --> AdminR[admin.py]
+    API --> Submit[submission.py]
+    API --> LB[leaderboard.py]
+    API --> Cfg[config.py]
+    
+    AdminR -->|Manage| Session[Session Manager]
+    Submit -->|Normalize| Normalizer[Normalizer]
+    Submit -->|Score| Scorer[Scorer]
+    LB -->|Assemble| LBService[Leaderboard Service]
+    
     Session -->|Generate| Fake[Fake Teams]
-    API -->|Load GT| CSV[groundtruth.csv]
-    API -->|Normalize| Normalizer[Normalizer]
-    Normalizer -->|KIS/QA/TR| Submission[NormalizedSubmission]
-    Submission -->|Score| Scorer[Competition Scorer]
-    Session -->|Timing Data| Scorer
-    CSV -->|Ground Truth| Scorer
+    Normalizer -->|Parse| NS[NormalizedSubmission]
+    NS -->|Validate| Scorer
+    Scorer -->|Calculate| Score[Score + Quality]
+    
+    Session -->|Track| State[Global State]
+    State -->|GT_TABLE| GT[Ground Truth]
+    GT -->|Load from| CSV[groundtruth.csv]
+    
     Config[current_task.yaml] -->|Parameters| Scorer
     Scorer -->|Results| Response[JSON Response]
-    Response -->|HTTP 200| Team
-    Session -->|Real + Fake Teams| Leaderboard[Leaderboard Data]
-    Leaderboard -->|JSON| UI
+    Response -->|HTTP| Team
+    
+    LBService -->|Real + Fake| LB
+    LB -->|JSON| UI
     
     style API fill:#4CAF50
     style Session fill:#9C27B0
     style Scorer fill:#FF9800
-    style Response fill:#2196F3
+    style State fill:#E91E63
     style UI fill:#2196F3
     style Fake fill:#FFC107
 ```
 
 **Key Features:**
-- Server-controlled timing (admin starts/stops questions)
-- Session management tracks real + fake teams
-- Penalty system for wrong submissions
-- Time-based scoring with exact match
-- Real-time leaderboard UI with simulated competitors
-- All API submissions mapped to "0THING2LOSE" team
+- **Modular Architecture:** Separate API, Core, Services layers
+- **Global State:** Centralized GT_TABLE via `app.state`
+- **Server-controlled timing:** Admin starts/stops questions
+- **Session management:** Tracks real + fake teams
+- **Tolerance-based scoring:** Distance-weighted match quality
+- **Real-time leaderboard:** Grid + table views with 20 real teams
+- **Auto team mapping:** All submissions → "0THING2LOSE"
+
+## Project Structure
+
+```
+app/
+├── main.py                    # FastAPI entry point (~100 lines)
+├── state.py                   # Global state (GT_TABLE)
+├── models.py                  # Pydantic data models
+├── utils.py                   # Utility functions
+│
+├── api/                       # API Layer - FastAPI routers
+│   ├── __init__.py
+│   ├── health.py             # GET / - Health check
+│   ├── admin.py              # POST /admin/* - Admin controls
+│   ├── submission.py         # POST /submit, GET /questions
+│   ├── leaderboard.py        # GET /api/leaderboard-data, UI routes
+│   └── config.py             # GET /config
+│
+├── core/                      # Core Business Logic
+│   ├── __init__.py
+│   ├── groundtruth.py        # Load CSV → GT_TABLE
+│   ├── normalizer.py         # Parse & normalize KIS/QA/TR
+│   ├── scoring.py            # Score with tolerance + distance
+│   └── session.py            # Question session management
+│
+├── services/                  # Support Services
+│   ├── __init__.py
+│   ├── fake_teams.py         # Generate 19 fake teams
+│   └── leaderboard.py        # Assemble leaderboard data
+│
+└── deprecated/                # Legacy Code
+    ├── __init__.py
+    └── config.py             # Old YAML config loader
+```
 
 ## Component Architecture
 
-### 1. FastAPI Server (`app/main.py`)
+### 1. API Layer (`app/api/`)
 
-Main application server with admin, public, and UI endpoints:
+Handles HTTP requests and routes to core business logic.
 
-```mermaid
-graph TB
-    A[FastAPI App] --> B[Admin Endpoints]
-    A --> C[Public Endpoints]
-    A --> D[UI Endpoints]
-    
-    B --> B1[POST /admin/start-question]
-    B --> B2[POST /admin/stop-question]
-    B --> B3[POST /admin/reset-all]
-    B --> B4[GET /admin/sessions]
-    
-    C --> C1[GET /]
-    C --> C2[GET /config]
-    C --> C3[GET /question/:id/status]
-    C --> C4[GET /leaderboard]
-    C --> C5[POST /submit]
-    
-    D --> D1[GET /leaderboard-ui]
-    D --> D2[GET /api/leaderboard-data]
-    D --> D3[Static Files]
+**Routers:**
+- **`health.py`**: Health check endpoint
+  - `GET /` → Server status, version, question count
+  
+- **`admin.py`**: Admin management
+  - `POST /admin/start-question` → Start question with timer
+  - `POST /admin/stop-question` → Stop active question
+  - `GET /admin/sessions` → List all sessions
+  - `POST /admin/reset` → Reset all sessions
+
+- **`submission.py`**: Team submissions
+  - `POST /submit` → Submit answer (auto team_id/question_id)
+  - `GET /questions` → List all available questions
+
+- **`leaderboard.py`**: Leaderboard & UI
+  - `GET /api/leaderboard-data` → JSON data for all questions
+  - `GET /leaderboard-ui` → Serve HTML page
+  - `GET /admin-dashboard` → Serve admin HTML
+
+- **`config.py`**: Configuration
+  - `GET /config` → Active question config + all questions
+
+**Design Pattern:**
+```python
+# All routers use FastAPI's APIRouter
+from fastapi import APIRouter
+from app import state
+
+router = APIRouter(prefix="/admin", tags=["admin"])
+
+@router.post("/start-question")
+async def start_question_endpoint(request: dict):
+    # Access global state
+    if question_id not in state.GT_TABLE:
+        raise HTTPException(404, "Question not found")
+    # ... business logic
 ```
 
-**Responsibilities:**
-- Handle HTTP requests/responses
-- CORS middleware for development
-- Load groundtruth on startup
-- Manage question sessions (real + fake teams)
-- Track team submissions
-- Force map all submissions to "0THING2LOSE"
-- Calculate scores with time and penalties
-- Generate leaderboard with simulated competitors
-- Serve real-time UI
+### 2. Core Business Logic (`app/core/`)
 
-### 2. Data Models (`app/models.py`)
+The core layer contains all business logic, independent of HTTP/API concerns.
+
+**Modules:**
+
+**`groundtruth.py`** - Load ground truth data
+```python
+def load_groundtruth(csv_path: str) -> Dict[int, GroundTruth]:
+    """Load CSV → Dict[question_id, GroundTruth]"""
+    # Parse CSV, validate points (must be even-length)
+    # Return GT_TABLE for global state
+```
+
+**`normalizer.py`** - Parse and normalize submissions
+```python
+def normalize_kis(body: dict, qid: int) -> NormalizedSubmission:
+    """Parse KIS format → normalized values"""
+    
+def normalize_qa(body: dict, qid: int) -> NormalizedSubmission:
+    """Parse QA-<answer>-<scene>_<video>-<ms1>,<ms2>"""
+    # Validate: uppercase, no accents, no spaces
+    
+def normalize_tr(body: dict, qid: int) -> NormalizedSubmission:
+    """Parse TR-<scene>_<video>-<frame1>,<frame2>"""
+```
+
+**`scoring.py`** - Score calculation with tolerance
+```python
+def score_submission(
+    submission: NormalizedSubmission,
+    gt: GroundTruth,
+    elapsed_time: float,
+    k: int,
+    params: ScoringParams
+) -> dict:
+    """
+    Calculate score with:
+    - Tolerance-based matching (±2500ms KIS/QA, ±12 frames TR)
+    - Distance-based quality (linear decay center → boundary)
+    - Time factor (earlier = higher score)
+    - Penalty (k wrong attempts)
+    
+    Returns: {score, correctness_factor, match_quality, ...}
+    """
+```
+
+**`session.py`** - Question session management
+```python
+# Global session storage
+active_questions: Dict[int, QuestionSession] = {}
+
+def start_question(qid: int, time_limit: int, buffer: int) -> QuestionSession:
+    """Start question timer, create session"""
+    
+def stop_question(qid: int):
+    """Stop question, mark inactive"""
+    
+def is_question_active(qid: int) -> bool:
+    """Check if within time limit + buffer"""
+    
+def record_submission(qid: int, team_id: str, is_correct: bool, score: float):
+    """Track submission for team"""
+    
+def get_question_leaderboard(qid: int) -> List[dict]:
+    """Get rankings for one question"""
+```
+
+**Data Models (`app/models.py`):**
 
 ```mermaid
 classDiagram
@@ -93,6 +216,7 @@ classDiagram
         +int question_id
         +str qtype
         +str video_id
+        +str scene_id
         +List~int~ values
     }
     
@@ -130,17 +254,18 @@ classDiagram
 
 **GroundTruth:**
 - Represents one question from CSV
-- `points`: Even-length list, each pair = 1 event (dash-separated)
+- `points`: Even-length list, each pair = 1 event
 
 **NormalizedSubmission:**
 - Unified format after normalization
 - `values`: User submitted values (ms or frame_id)
+- Includes scene_id and video_id validation
 
 **QuestionSession:**
 - Server-controlled question timing
-- Tracks all team submissions for the question
+- Tracks all team submissions
 - Manages active/inactive state
-- Contains both real teams and fake teams for leaderboard
+- Contains both real teams and fake teams
 
 **TeamSubmission:**
 - Per-team tracking within a question
@@ -153,36 +278,104 @@ classDiagram
 - p_max=100, p_base=50, p_penalty=10
 - time_limit=300s, buffer_time=10s
 
-### 3. Fake Teams Generator (`app/fake_teams.py`)
+### 3. Support Services (`app/services/`)
 
-**NEW COMPONENT** for leaderboard simulation:
+**`fake_teams.py`** - Generate realistic fake team data
+
+The system now uses **20 real AIC 2025 team names** instead of generic fake names:
 
 ```python
-# Key Functions:
-- generate_fake_team_names(count) → List[str]
-  # Creates 15 unique team names
-  
-- generate_weighted_score() → float
-  # Score distribution: 80-100 (15%), 60-80 (30%), 40-60 (35%), 0-40 (20%)
-  
-- should_submit() → bool
-  # 85% teams submit, 15% don't
-  
-- generate_submission_attempts() → (wrong, correct)
-  # 60% correct first try
-  # 25% 1 wrong then correct
-  # 10% 2-3 wrong then correct
-  # 5% only wrong attempts
+REAL_TEAM_NAMES = [
+    "UIT@Dzeus", "TKU.TonNGoYsss", "UTE AI LAB",
+    "HCMUS_DeepLearning_Team", "HCMIU-Beyond_Limits",
+    "NLU_Knights", "HUST_ICT01", "Titan",
+    "VGU_Guardian", "UIT_Together", "FPT_AI",
+    "Zalo AI", "SOICT_BKAI", "VNUHCM_AI",
+    "HCMUS_AIChallenge", "SGU_Warriors", "HUTECH_AI",
+    "TDTU_MindSet", "UTH_Phoenix", "VNU_Hanoi_AI"
+]
+
+# Excludes "0THING2LOSE" (real team) from fake generation
+# Total: 19 fake teams + 1 real team = 20 teams on leaderboard
 ```
 
-### 4. Session Manager (`app/session.py`)
+**Functions:**
+```python
+def generate_fake_teams(question_id: int, gt: GroundTruth, 
+                       p_max: int, time_limit: int) -> Dict[str, TeamSubmission]:
+    """
+    Generate 19 fake teams with realistic behavior:
+    - Score distribution: 80-100 (15%), 60-80 (30%), 40-60 (35%), 0-40 (20%)
+    - Submission rate: 85% teams submit, 15% don't
+    - Attempts: 60% first try, 25% 1 wrong, 10% 2-3 wrong, 5% only wrong
+    - Time variance: ±30% of time limit
+    """
+```
+
+**`leaderboard.py`** - Assemble leaderboard data
+
+```python
+def assemble_leaderboard_data(gt_table: Dict) -> dict:
+    """
+    Aggregate data from all question sessions:
+    - Merge real teams + fake teams
+    - Calculate per-question scores
+    - Calculate total scores
+    - Sort by total (desc) → time (asc)
+    - Return: {questions: [...], teams: [...]}
+    """
+```
+```
+
+### 4. Global State (`app/state.py`)
+
+Centralized global state accessible across all modules:
+
+```python
+from typing import Dict, Optional
+
+# Global ground truth table
+# Loaded at startup and accessible throughout the application
+GT_TABLE: Optional[Dict] = None
+```
+
+**Usage Pattern:**
+```python
+# In main.py (startup)
+from app import state
+from app.core.groundtruth import load_groundtruth
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    state.GT_TABLE = load_groundtruth("data/groundtruth.csv")
+    yield
+
+# In any router or module
+from app import state
+
+@router.get("/questions")
+async def list_questions():
+    if not state.GT_TABLE:
+        return {"questions": []}
+    
+    for qid, gt in state.GT_TABLE.items():
+        # ... use ground truth
+```
+
+**Benefits:**
+- ✅ No dependency injection complexity
+- ✅ Single source of truth
+- ✅ Easy to access from any module
+- ✅ FastAPI recommended pattern for global state
+
+### 5. Session Manager (`app/core/session.py`)
 
 Server-controlled question timing and team tracking:
 
 ```mermaid
 flowchart TD
     A[Admin Starts Question] --> B[Create QuestionSession]
-    B --> B1[Generate 15 Fake Teams]
+    B --> B1[Generate 19 Fake Teams]
     B --> C[Record start_time]
     C --> D[Set time_limit + buffer]
     D --> E[Session Active]
