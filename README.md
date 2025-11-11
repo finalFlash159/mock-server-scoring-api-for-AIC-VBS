@@ -28,16 +28,6 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
   # => keep the returned team_session_id secret
   ```
 
-### UI preview
-
-**Admin Dashboard**
-
-![Admin Dashboard](assests/admin-dashboard.png)
-
-**Leaderboard**
-
-![Leaderboard](assests/leaderboard.png)
-
 ---
 
 ## 2. Data Configuration (`data/groundtruth.csv`)
@@ -71,7 +61,7 @@ Update the CSV and restart the server (or hot-reload) to load new questions.
 
 Base URL examples:
 - Local machine: `http://localhost:8000`
-- Same LAN: `http://192.168.x.x:8000` (replace with your IP)
+- Same Network/wifi: `http://192.168.x.x:8000` (replace with your IP)
 
 ### Admin lifecycle
 | Endpoint | Method | Body | Description |
@@ -146,3 +136,4 @@ Rules of thumb:
 ## 4. Reference
 - [Scoring logic](docs/scoring-logic.md)
 - [System design](docs/system-design.md)
+
