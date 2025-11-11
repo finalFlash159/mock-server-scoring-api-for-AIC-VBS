@@ -234,14 +234,13 @@ Points: "4890-5000-5001-5020"
 Events: [(4890,5000), (5001,5020)]
 ```
 
-**Submission:**
+**Submission (POST /submit):**
 ```json
 {
-  "team_id": "team_01",
-  "question_id": 1,
+  "teamSessionId": "<token-from-/teams/register>",
   "answerSets": [{
     "answers": [
-      {"text": "TR-V017-4890,5000,5001,5020"}
+      {"text": "TR-K14_V026-4890,5000,5001,5020"}
     ]
   }]
 }
@@ -299,14 +298,13 @@ Events: [(4890,5000), (5001,5020)]
 Boundaries: [4890, 5000, 5001, 5020]
 ```
 
-**Submission:**
+**Submission (POST /submit):**
 ```json
 {
-  "team_id": "team_02",
-  "question_id": 1,
+  "teamSessionId": "<token-from-/teams/register>",
   "answerSets": [{
     "answers": [
-      {"text": "TR-V017-4890,5000,5001"}
+      {"text": "TR-K14_V026-4890,5000,5001"}
     ]
   }]
 }
@@ -365,8 +363,7 @@ Boundaries: [4890, 5000, 5001, 5020]
 **Submission 1 (Wrong):**
 ```json
 {
-  "team_id": "team_03",
-  "question_id": 2,
+  "teamSessionId": "<token>",
   "answerSets": [{
     "answers": [
       {"mediaItemName": "V017", "start": "1000", "end": "1000"},
@@ -401,8 +398,7 @@ Response:
 **Submission 2 (Correct):**
 ```json
 {
-  "team_id": "team_03",
-  "question_id": 2,
+  "teamSessionId": "<token>",
   "answerSets": [{
     "answers": [
       {"mediaItemName": "V017", "start": "4890", "end": "4890"},

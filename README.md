@@ -30,9 +30,13 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 ### UI preview
 
-Admin Dashboard             |  Leaderboard
-:--------------------------:|:--------------------------:
-![Admin Dashboard](assests/admin-dashboard.png) | ![Leaderboard](assests/leaderboard.png)
+**Admin Dashboard**
+
+![Admin Dashboard](assests/admin-dashboard.png)
+
+**Leaderboard**
+
+![Leaderboard](assests/leaderboard.png)
 
 ---
 

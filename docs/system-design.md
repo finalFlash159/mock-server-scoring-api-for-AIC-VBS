@@ -101,7 +101,7 @@ Handles HTTP requests and routes to core business logic.
   - `POST /admin/reset` → Reset all sessions
 
 - **`submission.py`**: Team submissions
-  - `POST /submit` → Submit answer (auto team_id/question_id)
+  - `POST /submit` → Submit answer (requires `teamSessionId` token)
   - `GET /questions` → List all available questions
 
 - **`leaderboard.py`**: Leaderboard & UI
@@ -111,6 +111,9 @@ Handles HTTP requests and routes to core business logic.
 
 - **`config.py`**: Configuration
   - `GET /config` → Active question config + all questions
+
+- **`team.py`**: Team registration
+  - `POST /teams/register` → Register a team name and obtain `team_session_id`
 
 **Design Pattern:**
 ```python
@@ -424,7 +427,7 @@ Converts different body formats to unified `NormalizedSubmission`:
 
 ```mermaid
 flowchart LR
-    A[Request Body + team_id] --> B{Task Type?}
+    A[Request Body + teamSessionId] --> B{Task Type?}
     B -->|KIS| C[normalize_kis]
     B -->|QA| D[normalize_qa]
     B -->|TR| E[normalize_tr]
@@ -638,11 +641,42 @@ scoring-server/
 }
 ```
 
+### POST `/teams/register`
+
+**Purpose:** Register a team and receive a submission token.
+
+**Request:**
+```json
+{
+  "team_name": "Zero9"
+}
+```
+
+**Response:**
+```json
+{
+  "team_id": "team-zero9-a1b2c3",
+  "team_name": "Zero9",
+  "team_session_id": "5957bb4a31c74aadac118cc55a570d24",
+  "message": "Team registered. Keep your teamSessionId secret."
+}
+```
+
 ### POST `/submit`
 
-**Purpose:** Submit answer and get score
+**Purpose:** Submit answer and get score. Body must include the `teamSessionId` returned by `/teams/register`.
 
-**Request:** See README.md for format details
+**Request:**
+```json
+{
+  "teamSessionId": "5957bb4a31c74aadac118cc55a570d24",
+  "answerSets": [{
+    "answers": [
+      { "mediaItemName": "K14_V026", "start": "370000", "end": "386000" }
+    ]
+  }]
+}
+```
 
 **Response:**
 ```json
