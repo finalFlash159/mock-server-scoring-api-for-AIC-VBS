@@ -24,6 +24,7 @@ from app.core.groundtruth import load_groundtruth
 # Import all API routers
 from app.api import health, admin, submission, leaderboard
 from app.api import config as config_router
+from app.api import team as team_router
 
 
 # Setup logging
@@ -85,6 +86,9 @@ app.include_router(leaderboard.router)
 
 # Config endpoint (GET /config)
 app.include_router(config_router.router)
+
+# Team registration
+app.include_router(team_router.router)
 
 
 # ==================== STATIC FILES ====================

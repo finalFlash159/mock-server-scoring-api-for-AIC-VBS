@@ -2,7 +2,7 @@
 Tests for AIC 2025 Competition Scoring with Tolerance-Based Matching
 """
 import pytest
-from app.scoring import (
+from app.core.scoring import (
     calculate_time_factor,
     check_match_with_tolerance,
     calculate_correctness_factor,

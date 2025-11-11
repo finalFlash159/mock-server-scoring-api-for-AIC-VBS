@@ -1,9 +1,0 @@
-# Configuration for AIC 2025 Scoring Server
-# Only active fields - deprecated fields removed
-
-active_question_id: 22
-p_max: 100.0
-p_base: 50.0
-p_penalty: 10.0
-time_limit: 300
-buffer_time: 10

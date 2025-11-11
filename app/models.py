@@ -1,8 +1,8 @@
 """
 Data models for scoring server
 """
-from pydantic import BaseModel
-from typing import List, Dict, Optional
+from pydantic import BaseModel, Field
+from typing import Dict, List, Optional
 
 
 class GroundTruth(BaseModel):
@@ -54,7 +54,9 @@ class TeamSubmission(BaseModel):
     """Track one team's submissions for a question"""
     team_id: str
     question_id: int
-    submit_times: List[float] = []        # Timestamps of all submissions
+    team_name: Optional[str] = None
+    team_session_id: Optional[str] = None
+    submit_times: List[float] = Field(default_factory=list)  # Timestamps of all submissions
     wrong_count: int = 0                  # k = number of wrong submissions
     correct_count: int = 0                # Number of correct submissions (0 or 1)
     first_correct_time: Optional[float] = None
@@ -69,8 +71,8 @@ class QuestionSession(BaseModel):
     time_limit: int = 300                 # seconds
     buffer_time: int = 10                 # ±10s buffer
     is_active: bool = True
-    team_submissions: Dict[str, TeamSubmission] = {}
-    fake_teams: Dict[str, TeamSubmission] = {}  # Fake teams for leaderboard
+    team_submissions: Dict[str, TeamSubmission] = Field(default_factory=dict)
+    fake_teams: Dict[str, TeamSubmission] = Field(default_factory=dict)  # Fake teams for leaderboard
     
     class Config:
         arbitrary_types_allowed = True

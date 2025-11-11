@@ -46,6 +46,13 @@ def normalize_kis(body: Dict, question_id: int) -> NormalizedSubmission:
     scene_id = None
     video_id = None
     
+    def _to_int(value) -> int:
+        if value is None or value == "":
+            raise ValueError("Missing start/end value in KIS answer")
+        if isinstance(value, (int, float)):
+            return int(value)
+        return int(float(str(value).strip()))
+    
     for answer in answers:
         # Get scene_id and video_id from first answer
         if scene_id is None or video_id is None:
@@ -59,15 +66,10 @@ def normalize_kis(body: Dict, question_id: int) -> NormalizedSubmission:
             scene_id = parts[0]
             video_id = parts[1]
         
-        # Use start time as the submission value (ms)
-        start = answer.get("start", "")
-        if start:
-            # Handle int, float, and string types
-            if isinstance(start, (int, float)):
-                values.append(int(start))  # Convert float to int directly
-            else:
-                # String: may contain decimals, convert via float first
-                values.append(int(float(str(start).strip())))
+        # Capture start/end milliseconds for each event
+        start_val = _to_int(answer.get("start"))
+        end_val = _to_int(answer.get("end", start_val))
+        values.extend([start_val, end_val])
     
     if not scene_id or not video_id:
         raise ValueError("No valid mediaItemName (SCENE_ID_VIDEO_ID) found in KIS answers")
@@ -107,11 +109,9 @@ def normalize_qa(body: Dict, question_id: int) -> NormalizedSubmission:
     Text format: QA-<ANSWER>-<SCENE_ID>_<VIDEO_ID>-<MS1>,<MS2>,...
     
     Rules for answer (STRICT - no normalization):
-    - Must be UPPERCASE (all caps)
-    - No accents (diacritics)
-    - No spaces
-    - Example: Must send "MOCCHAU" (NOT "Mộc Châu" or "Moc Chau")
-    - Answer is checked as-is without any formatting
+    - Answer text is captured verbatim (any character is allowed).
+    - Comparison is case-sensitive and accent-sensitive because we do not transform the text.
+    - Teams must send the exact canonical text stored in ground truth.
     
     Args:
         body: Request body JSON
@@ -132,7 +132,7 @@ def normalize_qa(body: Dict, question_id: int) -> NormalizedSubmission:
     
     # Pattern: QA-<ANSWER>-<SCENE_ID>_<VIDEO_ID>-<TIME(s)>
     # Answer can be any text, times can be comma-separated
-    pattern = r"QA-(.+?)-([A-Za-z0-9]+)_([A-Za-z0-9]+)-(.+)"
+    pattern = r"^QA-(.+)-([A-Za-z0-9]+)_([A-Za-z0-9]+)-(.+)$"
     
     for answer in answers:
         text = answer.get("text", "").strip()

@@ -6,7 +6,7 @@ from typing import List, Tuple
 
 # Pool of real AIC 2025 team names
 TEAM_NAMES = [
-    "UIT@Dzeus", "TKU.TonNGoYsss", "UTE AI LAB", "UIT-SHAMROCK",
+    "0THING2LOSE", "UIT@Dzeus", "TKU.TonNGoYsss", "UTE AI LAB", "UIT-SHAMROCK",
     "TKU@MBZUAI", "TKU@UNIVORN&WHEAT", "Althena", "Your answer",
     "float97", "KPT", "GALAXY-AI", "Lucifer",
     "FLameReavers", "OpenCubee_1", "OpenCubee2", "Nomial",
@@ -16,7 +16,7 @@ TEAM_NAMES = [
 
 def generate_fake_team_names(count: int = 20) -> List[str]:
     """
-    Generate unique team names excluding 0THING2LOSE
+    Generate unique team names for fake leaderboard slots
     
     Args:
         count: Number of fake teams to generate (default 20 - all AIC 2025 teams)
@@ -24,7 +24,7 @@ def generate_fake_team_names(count: int = 20) -> List[str]:
     Returns:
         List of unique team names
     """
-    available = [name for name in TEAM_NAMES if name != "0THING2LOSE"]
+    available = TEAM_NAMES[:]
     
     # Use all available teams, or sample if count is less
     if count >= len(available):
@@ -38,23 +38,23 @@ def generate_weighted_score() -> float:
     Generate random score with weighted distribution
     
     Score distribution:
-    - 80-100: 5% (high scores - very rare)
-    - 60-80: 20% (good scores)
-    - 40-60: 40% (medium scores)
-    - 0-40: 35% (low scores)
+    - 80-100: 10%  (buff high rollers)
+    - 60-80: 30%  (good scores)
+    - 40-60: 35%  (medium scores)
+    - 0-40 : 25%  (low scores)
     
     Returns:
         Score between 0 and 100
     """
     rand = random.random()
     
-    if rand < 0.05:  # 5% - High scores (reduced from 15%)
+    if rand < 0.10:
         return round(random.uniform(80, 100), 1)
-    elif rand < 0.25:  # 20% - Good scores (reduced from 30%)
+    elif rand < 0.40:
         return round(random.uniform(60, 80), 1)
-    elif rand < 0.65:  # 40% - Medium scores (increased from 35%)
+    elif rand < 0.75:
         return round(random.uniform(40, 60), 1)
-    else:  # 35% - Low scores (increased from 20%)
+    else:
         return round(random.uniform(0, 40), 1)
 
 
@@ -99,40 +99,16 @@ def generate_submission_attempts() -> Tuple[int, int]:
         return (random.randint(1, 3), 0)
 
 
-def generate_random_submit_time(time_limit: float) -> float:
+def generate_submit_delay(time_limit: float) -> float:
     """
-    Generate random submission time within question duration
+    Generate random delay before fake team submits.
     
-    Most submissions happen in first 50% of time limit,
-    fewer near the end
-    
-    Args:
-        time_limit: Maximum time in seconds
-        
-    Returns:
-        Random time between 0 and time_limit
+    Delay is scaled to the current question time limit so fake teams always
+    submit while the question is still active.
     """
-    # Weighted toward earlier submissions
-    rand = random.random()
+    if time_limit <= 0:
+        return 1.0
     
-    if rand < 0.50:  # 50% submit in first quarter
-        return random.uniform(0, time_limit * 0.25)
-    elif rand < 0.80:  # 30% submit in second quarter
-        return random.uniform(time_limit * 0.25, time_limit * 0.50)
-    elif rand < 0.95:  # 15% submit in third quarter
-        return random.uniform(time_limit * 0.50, time_limit * 0.75)
-    else:  # 5% submit in last quarter
-        return random.uniform(time_limit * 0.75, time_limit)
-
-
-def generate_submit_delay() -> float:
-    """
-    Generate random delay before fake team submits
-    
-    Delay range: 15 seconds to 4 minutes (240 seconds)
-    Distribution is uniform random
-    
-    Returns:
-        Delay in seconds (15-240)
-    """
-    return random.uniform(15, 240)
+    min_delay = max(0.5, time_limit * 0.02)   # 2% of duration (>=0.5s)
+    max_delay = max(min_delay, time_limit * 0.6)  # cap ở 60% thời lượng để leaderboard lên điểm sớm
+    return random.uniform(min_delay, max_delay)

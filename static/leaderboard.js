@@ -5,6 +5,26 @@ const REFRESH_INTERVAL = 2000; // 2 seconds
 // State management
 let currentTab = 'realtime';
 let leaderboardData = null;
+const pastelPalette = [
+    '#FF9EB5', '#9CC7FF', '#FFBD8B', '#8EE3B3',
+    '#B99CFF', '#FFC577', '#7FD7FF', '#FF9FD3',
+    '#8DE58D', '#A9B6FF', '#FFB48F', '#7FE4D3',
+    '#FFA4A4', '#8FD8FF', '#D49CFF', '#FFAD7A',
+    '#7FE0A6', '#9FA8FF', '#FF9ECF', '#7FCBE4',
+    '#C2FF7F', '#FFB1A8'
+];
+const teamColorMap = {};
+let unusedColors = [...pastelPalette];
+
+function assignColor(teamName) {
+    if (teamColorMap[teamName]) return teamColorMap[teamName];
+    if (unusedColors.length === 0) {
+        unusedColors = [...pastelPalette].sort(() => Math.random() - 0.5);
+    }
+    const color = unusedColors.shift();
+    teamColorMap[teamName] = color;
+    return color;
+}
 
 /**
  * Switch between Real-time and Overall tabs
@@ -94,26 +114,23 @@ function renderRealtimeView(data) {
         return;
     }
     
-    // Filter teams that have data for active question
-    const realTeam = data.teams.find(t => t.is_real);
+    // Split teams by real/fake for current question
+    const realTeams = data.teams.filter(t => t.is_real && t.questions[activeQuestionId]);
     const fakeTeams = data.teams.filter(t => !t.is_real && t.questions[activeQuestionId]);
-    
-    // Sort fake teams by score for current question (descending)
-    fakeTeams.sort((a, b) => {
+
+    const sortByScore = (list) => list.sort((a, b) => {
         const scoreA = a.questions[activeQuestionId]?.score || 0;
         const scoreB = b.questions[activeQuestionId]?.score || 0;
         return scoreB - scoreA;
     });
-    
-    // Build cards: Real team FIRST, then fake teams
+
+    sortByScore(realTeams);
+    sortByScore(fakeTeams);
+
     let cardsHTML = '';
-    
-    // 1. Real team card (always first)
-    if (realTeam) {
-        cardsHTML += createTeamCard(realTeam, activeQuestionId, true);
-    }
-    
-    // 2. Fake teams cards
+    realTeams.forEach(team => {
+        cardsHTML += createTeamCard(team, activeQuestionId, true);
+    });
     fakeTeams.forEach(team => {
         cardsHTML += createTeamCard(team, activeQuestionId, false);
     });
@@ -140,16 +157,26 @@ function createTeamCard(team, questionId, isReal) {
     
     // Determine color: green if has score, red if no score
     const scoreClass = score > 0 ? 'score-green' : 'score-red';
+    const cardColor = assignColor(team.team_name);
     
     return `
-        <div class="team-card ${isReal ? 'real-team' : ''}">
-            <div class="team-info">
+        <div class="team-card ${isReal ? 'real-team' : ''}" style="--team-color: ${cardColor};">
+            <div class="team-body">
                 <div class="team-name">${team.team_name}</div>
-                <div class="score ${scoreClass}">${score.toFixed(1)}</div>
+                <div class="score-panel">
+                    <span class="score-label">Score</span>
+                    <span class="score-number ${scoreClass}">${score.toFixed(1)}</span>
+                </div>
             </div>
-            <div class="team-stats">
-                <div class="stat-correct">${correctCount}</div>
-                <div class="stat-wrong">${wrongCount}</div>
+            <div class="team-status">
+                <div class="status-box correct">
+                    ${correctCount}
+                    <span>correct</span>
+                </div>
+                <div class="status-box wrong">
+                    ${wrongCount}
+                    <span>wrong</span>
+                </div>
             </div>
         </div>
     `;

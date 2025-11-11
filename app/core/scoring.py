@@ -285,6 +285,8 @@ def score_submission(
     Returns:
         Scoring result dictionary
     """
+    time_factor = calculate_time_factor(t_submit, params.time_limit)
+    
     # Validate scene_id and video_id match - return 0 score if wrong
     if submission.scene_id != ground_truth.scene_id or submission.video_id != ground_truth.video_id:
         return {
@@ -294,7 +296,7 @@ def score_submission(
             "matched_events": 0,
             "total_events": len(ground_truth.points) // 2,
             "percentage": 0.0,
-            "time_factor": 1 - (t_submit / params.time_limit),
+            "time_factor": time_factor,
             "elapsed_time": t_submit,
             "wrong_attempts": k,
             "penalty": k * params.p_penalty,
@@ -312,7 +314,7 @@ def score_submission(
                     "matched_events": 0,
                     "total_events": len(ground_truth.points) // 2,
                     "percentage": 0.0,
-                    "time_factor": 1 - (t_submit / params.time_limit),
+                    "time_factor": time_factor,
                     "elapsed_time": t_submit,
                     "wrong_attempts": k,
                     "penalty": k * params.p_penalty,
@@ -328,7 +330,7 @@ def score_submission(
                     "matched_events": 0,
                     "total_events": len(ground_truth.points) // 2,
                     "percentage": 0.0,
-                    "time_factor": 1 - (t_submit / params.time_limit),
+                    "time_factor": time_factor,
                     "elapsed_time": t_submit,
                     "wrong_attempts": k,
                     "penalty": k * params.p_penalty,

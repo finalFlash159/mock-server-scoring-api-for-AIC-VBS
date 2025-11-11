@@ -2,9 +2,14 @@
 Ground truth loader from CSV
 """
 import csv
+import logging
 from pathlib import Path
 from typing import Dict
+
 from app.models import GroundTruth
+
+
+logger = logging.getLogger(__name__)
 
 
 def load_groundtruth(csv_path: str) -> Dict[int, GroundTruth]:
@@ -87,6 +92,6 @@ def load_groundtruth(csv_path: str) -> Dict[int, GroundTruth]:
     if not gt_table:
         raise ValueError(f"No ground truth data loaded from {csv_path}")
     
-    print(f"✅ Loaded {len(gt_table)} ground truth entries from {csv_path}")
+    logger.info("Loaded %s ground truth entries from %s", len(gt_table), csv_path)
     
     return gt_table

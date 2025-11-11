@@ -2,24 +2,58 @@
 Question-level session management for AIC 2025 Competition
 Server-controlled timing with per-team submission tracking
 """
-import time
 import asyncio
+import logging
 import random
-from typing import Dict, Optional, List
+import time
+from typing import Dict, List, Optional
+
 from app.models import QuestionSession, TeamSubmission
 
+
+logger = logging.getLogger(__name__)
 
 # Global storage: question_id → QuestionSession
 active_questions: Dict[int, QuestionSession] = {}
 
+# Track currently active question (last started that is still active)
+current_active_question_id: Optional[int] = None
 
-def initialize_fake_teams(question_id: int, time_limit: int) -> Dict[str, TeamSubmission]:
+
+def _refresh_active_question_id() -> Optional[int]:
+    """
+    Ensure the cached current_active_question_id points to an active session.
+    """
+    global current_active_question_id
+    if current_active_question_id and is_question_active(current_active_question_id):
+        return current_active_question_id
+    
+    # Find the most recently started active session (if any)
+    active_candidates = [
+        (session.start_time, qid)
+        for qid, session in active_questions.items()
+        if is_question_active(qid)
+    ]
+    if active_candidates:
+        _, qid = max(active_candidates)
+        current_active_question_id = qid
+        return current_active_question_id
+    
+    current_active_question_id = None
+    return None
+
+
+def get_current_active_question_id() -> Optional[int]:
+    """Return the current active question id (if still accepting submissions)."""
+    return _refresh_active_question_id()
+
+
+def initialize_fake_teams(question_id: int) -> Dict[str, TeamSubmission]:
     """
     Initialize fake teams placeholders (submissions will be scheduled with delay)
     
     Args:
         question_id: Question ID
-        time_limit: Time limit for the question
         
     Returns:
         Dictionary of fake team submissions (empty, to be populated by background tasks)
@@ -33,6 +67,7 @@ def initialize_fake_teams(question_id: int, time_limit: int) -> Dict[str, TeamSu
     for name in team_names:
         team_sub = TeamSubmission(
             team_id=name,
+            team_name=name,
             question_id=question_id,
             wrong_count=0,
             correct_count=0,
@@ -66,22 +101,31 @@ async def schedule_fake_team_submission(
     """
     await asyncio.sleep(delay)
     
-    # Check if question is still active
-    if question_id not in active_questions:
+    # Check if question still exists
+    session = active_questions.get(question_id)
+    if not session:
         return
     
-    session = active_questions[question_id]
+    def _is_accepting_submissions() -> bool:
+        if not session.is_active:
+            return False
+        elapsed = time.time() - session.start_time
+        return elapsed <= (session.time_limit + session.buffer_time)
+    
+    if not _is_accepting_submissions():
+        return
     
     # Submit wrong attempts first
     for _ in range(wrong_count):
-        record_submission(question_id, team_name, is_correct=False, score=None)
+        if not _is_accepting_submissions():
+            return
+        record_submission(question_id, team_name, is_correct=False, score=None, team_name=team_name)
         await asyncio.sleep(random.uniform(1, 5))  # Small delay between attempts
     
-    # Submit correct answer if any
-    if correct_count > 0:
-        record_submission(question_id, team_name, is_correct=True, score=score)
-    
-    print(f"✅ Fake team '{team_name}' submitted to Q{question_id} (wrong: {wrong_count}, correct: {correct_count})")
+    # Submit correct answer if still within allowed window
+    if correct_count > 0 and _is_accepting_submissions():
+        record_submission(question_id, team_name, is_correct=True, score=score, team_name=team_name)
+        logger.info("Fake team %s completed Q%s with score %.2f", team_name, question_id, score)
 
 
 def start_fake_team_submissions(question_id: int):
@@ -91,7 +135,6 @@ def start_fake_team_submissions(question_id: int):
     Args:
         question_id: Question ID
     """
-    import random
     from app.services.fake_teams import (
         generate_submission_attempts,
         generate_weighted_score,
@@ -101,19 +144,23 @@ def start_fake_team_submissions(question_id: int):
     session = active_questions[question_id]
     
     for team_name in session.fake_teams.keys():
+        is_special = team_name == "0THING2LOSE"
         wrong_count, correct_count = generate_submission_attempts()
         
-        # Skip if team doesn't submit
+        # Ensure special team always submits once
         if wrong_count == 0 and correct_count == 0:
-            continue
+            if is_special:
+                correct_count = 1
+            else:
+                continue
         
         # Generate score if team completes
         score = None
         if correct_count > 0:
-            score = generate_weighted_score()
+            score = generate_weighted_score() if not is_special else round(random.uniform(90, 99), 1)
         
-        # Generate random delay (15s to 4 minutes)
-        delay = generate_submit_delay()
+        # Generate delay
+        delay = 5 if is_special else generate_submit_delay(session.time_limit)
         
         # Create background task
         asyncio.create_task(
@@ -127,7 +174,11 @@ def start_fake_team_submissions(question_id: int):
             )
         )
     
-    print(f"✅ Scheduled fake team submissions for Q{question_id} with delays (15s-4min)")
+    logger.info(
+        "Scheduled fake team submissions for Q%s (delays scaled to %ss limit)",
+        question_id,
+        session.time_limit,
+    )
 
 
 def start_question(question_id: int, time_limit: int = 300, buffer_time: int = 10) -> QuestionSession:
@@ -142,6 +193,8 @@ def start_question(question_id: int, time_limit: int = 300, buffer_time: int = 1
     Returns:
         QuestionSession object
     """
+    global current_active_question_id
+    
     session = QuestionSession(
         question_id=question_id,
         start_time=time.time(),
@@ -149,15 +202,29 @@ def start_question(question_id: int, time_limit: int = 300, buffer_time: int = 1
         buffer_time=buffer_time,
         is_active=True,
         team_submissions={},
-        fake_teams=initialize_fake_teams(question_id, time_limit)
+        fake_teams=initialize_fake_teams(question_id)
     )
     active_questions[question_id] = session
-    print(f"✅ Question {question_id} started at {session.start_time}")
-    print(f"✅ Generated {len(session.fake_teams)} fake teams for leaderboard")
-    
+    current_active_question_id = question_id
+    logger.info("Question %s started at %.3f (time=%ss, buffer=%ss)", question_id, session.start_time, time_limit, buffer_time)
+    logger.info("Generated %s fake teams for Q%s", len(session.fake_teams), question_id)
+    # include already registered real teams
+    from app import state
+    for session_id, info in state.TEAM_REGISTRY.items():
+        if info["team_id"] not in session.team_submissions:
+            session.team_submissions[info["team_id"]] = TeamSubmission(
+                team_id=info["team_id"],
+                team_name=info["team_name"],
+                team_session_id=session_id,
+                question_id=question_id,
+                submit_times=[],
+                wrong_count=0,
+                correct_count=0
+            )
+
     # Start background tasks for fake team submissions with delays
     start_fake_team_submissions(question_id)
-    
+
     return session
 
 
@@ -214,7 +281,10 @@ def record_submission(
     question_id: int,
     team_id: str,
     is_correct: bool,
-    score: Optional[float] = None
+    score: Optional[float] = None,
+    *,
+    team_name: Optional[str] = None,
+    team_session_id: Optional[str] = None
 ) -> TeamSubmission:
     """
     Record a team's submission
@@ -244,12 +314,18 @@ def record_submission(
         if team_id not in session.team_submissions:
             session.team_submissions[team_id] = TeamSubmission(
                 team_id=team_id,
+                team_name=team_name or team_id,
+                team_session_id=team_session_id,
                 question_id=question_id,
                 submit_times=[],
                 wrong_count=0,
                 correct_count=0
             )
         team_sub = session.team_submissions[team_id]
+        if team_name and not team_sub.team_name:
+            team_sub.team_name = team_name
+        if team_session_id and not team_sub.team_session_id:
+            team_sub.team_session_id = team_session_id
     
     team_sub.submit_times.append(time.time())
     
@@ -267,10 +343,13 @@ def record_submission(
 
 def stop_question(question_id: int) -> None:
     """Admin stops a question (close submissions immediately)"""
+    global current_active_question_id
     session = active_questions.get(question_id)
     if session:
         session.is_active = False
-        print(f"🛑 Question {question_id} stopped")
+        logger.info("Question %s stopped by admin", question_id)
+        if current_active_question_id == question_id:
+            _refresh_active_question_id()
 
 
 def get_question_leaderboard(question_id: int) -> List[dict]:
@@ -327,7 +406,24 @@ def get_all_sessions_status() -> List[dict]:
 
 def reset_all_questions() -> int:
     """Reset all questions (testing only)"""
+    global current_active_question_id
     count = len(active_questions)
     active_questions.clear()
-    print(f"🔄 Reset all questions. Cleared {count} sessions.")
+    current_active_question_id = None
+    logger.info("Reset all questions. Cleared %s sessions.", count)
     return count
+
+
+def add_team_to_active_sessions(team_id: str, team_name: str, team_session_id: str) -> None:
+    for qid, session in active_questions.items():
+        if team_id in session.team_submissions:
+            continue
+        session.team_submissions[team_id] = TeamSubmission(
+            team_id=team_id,
+            team_name=team_name,
+            team_session_id=team_session_id,
+            question_id=qid,
+            submit_times=[],
+            wrong_count=0,
+            correct_count=0
+        )

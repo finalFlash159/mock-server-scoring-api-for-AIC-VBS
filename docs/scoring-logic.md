@@ -2,34 +2,34 @@
 
 ## Overview
 
-The **competition mode scoring system** uses exact matching with time-based penalties. Teams must match groundtruth exactly (no tolerance), and scores decrease based on submission time and wrong attempts.
+The **competition mode scoring system** uses tolerance-based matching with time and penalty adjustments. Teams must cover every ground-truth event, but individual timestamps can deviate within a configurable window. Match quality (distance from the event center) scales the final score, and the result is further adjusted by submission time and wrong-attempt penalties.
 
 ## Core Concepts
 
 ### 1. Events
 
 An event is defined by a start and end point:
-- **Ground Truth Event:** `(start, end)` from CSV (dash-separated)
-- **User Values:** Must match ALL event boundaries exactly
+- **Ground Truth Event:** `(start, end)` from CSV (comma-separated pairs)
+- **User Values:** Should include both start and end for every event (the scorer will apply tolerance/quality checks on each boundary pair).
 
 Example:
 ```
-Ground Truth: "4890-5000-5001-5020" → Events: [(4890,5000), (5001,5020)]
-User Must Submit: 4890, 5000, 5001, 5020 (all 4 values)
+Ground Truth: "4890,5000,5001,5020" → Events: [(4890,5000), (5001,5020)]
+User Submission: 4890, 5000, 5001, 5020 (all 4 values, order preserved)
 ```
 
-### 2. Exact Match (No Tolerance)
+### 2. Tolerance-Based Matching
 
-**Competition mode requires exact matching:**
-- No tolerance range
-- User values must match groundtruth boundaries precisely
-- One mismatch = incorrect submission
+- **KIS/QA:** Each event defines a window. The center `(start + end)/2` is perfect (100%), dropping linearly to 50% at `half_range + tolerance`. Anything outside earns 0%.
+- **TR:** Same distance curve, but teams can receive partial credit: ≥100% coverage → full score, 50-99% coverage → half score, <50% → zero.
+- **Matching:** Each user value greedily matches the ground-truth event that yields the highest score. Each event can be matched at most once.
 
 ```
-Ground Truth Events: [(4890,5000), (5001,5020)]
-Correct: [4890, 5000, 5001, 5020] ✅
-Wrong: [4890, 5000, 5001, 5021] ❌ (5021 != 5020)
-Wrong: [4890, 5000] ❌ (missing events)
+Event: [10000, 10050], tolerance ±12 frames
+User 10025 → center → 1.0
+User 10037 → distance 12 → ~0.84
+User 10062 → distance 37 → 0.5 (boundary)
+User 10063 → outside → 0.0
 ```
 
 ### 3. Competition Formula
@@ -61,19 +61,19 @@ flowchart TD
     B -->|Yes| D{Already Completed?}
     D -->|Yes| E[Return Error: Already Completed]
     D -->|No| F[Normalize Submission]
-    F --> G[Check Exact Match]
-    G --> H{All Values Match?}
+    F --> G[Match with Tolerance]
+    G --> H{All events covered?}
     H -->|No| I[Increment wrong_count]
     I --> J[Return Score 0]
     H -->|Yes| K[Calculate Correctness Factor]
     K --> L{Task Type?}
-    L -->|KIS/QA| M{100% Match?}
+    L -->|KIS/QA| M{Match quality}
     L -->|TR| N{Match Percentage?}
-    M -->|Yes| O[correctness = 1.0]
-    M -->|No| P[correctness = 0.0]
+    M --> O[correctness = quality]
     N -->|100%| O
-    N -->|50-99%| Q[correctness = 0.5]
-    N -->|<50%| P
+    N -->|50-99%| Q[correctness = quality × 0.5]
+    N -->|<50%| P[correctness = 0.0]
+    P --> R
     O --> R[Get Elapsed Time]
     Q --> R
     R --> S[Calculate Time Factor]
@@ -85,28 +85,20 @@ flowchart TD
 
 ### Detailed Steps
 
-#### 1. Check Exact Match
+#### 1. Match with tolerance
 
-```mermaid
-flowchart TD
-    A[User Values] --> B[Ground Truth Events]
-    B --> C[Extract All Boundaries]
-    C --> D[Sort Both Lists]
-    D --> E{Count Equal?}
-    E -->|No| F[Not Matched]
-    E -->|Yes| G{All Values Equal?}
-    G -->|No| F
-    G -->|Yes| H[Exact Match ✅]
-    F --> I[matched_count < total]
-    H --> J[matched_count = total]
-```
+1. Convert ground-truth point list to event tuples via `points_to_events`.
+2. For each submitted value, compute the best score against every event using `calculate_match_score`.
+3. Greedily keep the highest scoring mapping per event (each event can be matched once).
+4. Count how many events receive a match and average their quality scores (0.5–1.0).
+5. Result: `(matched_events, total_events, avg_quality)` for downstream correctness logic.
 
 #### 2. Calculate Correctness Factor
 
-**For KIS/QA (All-or-Nothing):**
+**For KIS/QA (All-or-Nothing but quality-weighted):**
 ```python
 if matched == total:
-    correctness_factor = 1.0
+    correctness_factor = avg_quality
 else:
     correctness_factor = 0.0
 ```
@@ -115,9 +107,9 @@ else:
 ```python
 percentage = matched / total
 if percentage >= 1.0:
-    correctness_factor = 1.0  # Full score
+    correctness_factor = avg_quality  # Full score, scaled by quality
 elif percentage >= 0.5:
-    correctness_factor = 0.5  # Half score
+    correctness_factor = avg_quality * 0.5  # Half score, scaled by quality
 else:
     correctness_factor = 0.0  # No score
 ```

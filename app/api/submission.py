@@ -9,10 +9,11 @@ from app.core.normalizer import normalize_kis, normalize_qa, normalize_tr
 from app.core.scoring import score_submission
 from app.core.session import (
     is_question_active, get_elapsed_time, get_remaining_time,
-    get_team_submission, record_submission, get_question_session
+    get_team_submission, record_submission, get_question_session,
+    get_current_active_question_id
 )
-from app.models import ScoringParams
-from app.deprecated.config import load_config
+from app.models import TeamSubmission
+from app.services.team_registry import get_team_by_session
 
 
 router = APIRouter(tags=["submission"])
@@ -26,6 +27,7 @@ async def submit_answer(request: Request):
     
     Request:
         {
+            "teamSessionId": "<token>",
             "answerSets": [...]  # Format depends on task type (KIS/QA/TR)
         }
     
@@ -59,12 +61,18 @@ async def submit_answer(request: Request):
         if not answer_sets:
             raise HTTPException(status_code=400, detail="answerSets required")
         
-        # SERVER AUTO-HANDLES: team_id always mapped to "0THING2LOSE"
-        team_id = "0THING2LOSE"
+        team_session_id = body.get("teamSessionId") or body.get("team_session_id")
+        if not team_session_id:
+            raise HTTPException(status_code=400, detail="teamSessionId is required")
+
+        team_info = get_team_by_session(team_session_id)
+        if not team_info:
+            raise HTTPException(status_code=404, detail="Invalid teamSessionId")
+        team_id = team_info["team_id"]
+        team_name = team_info["team_name"]
         
-        # SERVER AUTO-HANDLES: question_id from active question
-        cfg = load_config()
-        question_id = cfg.active_question_id
+        # SERVER AUTO-HANDLES: question_id from active session
+        question_id = get_current_active_question_id()
         
         if not question_id:
             raise HTTPException(
@@ -72,10 +80,13 @@ async def submit_answer(request: Request):
                 detail="No active question. Admin must start a question first."
             )
         
+        session = get_question_session(question_id)
+        if not session:
+            raise HTTPException(status_code=404, detail=f"Question {question_id} session not found")
+        
         # Check if question is active (includes buffer time check)
         if not is_question_active(question_id):
             elapsed = get_elapsed_time(question_id)
-            session = get_question_session(question_id)
             raise HTTPException(
                 status_code=400,
                 detail={
@@ -95,11 +106,23 @@ async def submit_answer(request: Request):
                 "error": "already_completed",
                 "detail": {
                     "score": team_sub.final_score,
-                    "completed_at": round(team_sub.first_correct_time - get_question_session(question_id).start_time, 2)
+                    "completed_at": round(team_sub.first_correct_time - session.start_time, 2) if team_sub.first_correct_time else None
                 },
                 "message": f"You already completed this question with score {team_sub.final_score}"
             }
         
+        session = get_question_session(question_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Question session not found")
+        if team_sub is None:
+            session.team_submissions[team_id] = TeamSubmission(
+                team_id=team_id,
+                team_name=team_name,
+                team_session_id=team_session_id,
+                question_id=question_id
+            )
+            team_sub = session.team_submissions[team_id]
+
         # Get ground truth from state
         gt = state.GT_TABLE.get(question_id) if state.GT_TABLE else None
         if not gt:
@@ -127,13 +150,12 @@ async def submit_answer(request: Request):
         k = team_sub.wrong_count if team_sub else 0
         
         # Load scoring params
-        cfg = load_config()
-        params = ScoringParams(
-            p_max=cfg.p_max,
-            p_base=cfg.p_base,
-            p_penalty=cfg.p_penalty,
-            time_limit=cfg.time_limit,
-            buffer_time=cfg.buffer_time
+        base_params = state.SCORING_PARAMS
+        params = base_params.copy(
+            update={
+                "time_limit": session.time_limit,
+                "buffer_time": session.buffer_time
+            }
         )
         
         # Score submission
@@ -143,7 +165,14 @@ async def submit_answer(request: Request):
         is_correct = result["correctness_factor"] > 0
         
         # Record submission
-        record_submission(question_id, team_id, is_correct, result["score"] if is_correct else None)
+        record_submission(
+            question_id,
+            team_id,
+            is_correct,
+            result["score"] if is_correct else None,
+            team_name=team_name,
+            team_session_id=team_session_id
+        )
         
         # Build response
         if is_correct:

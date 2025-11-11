@@ -1,653 +1,144 @@
-# AIC 2025 - Scoring Server (Competition Mode)
+# AIC 2025 – Scoring Server
 
-Mock scoring server for AIC 2025 supporting 3 task types: **KIS**, **QA**, **TR** with **server-controlled timing**, **penalty system**, **exact match scoring**, **admin dashboard**, and **real-time leaderboard UI**.
+Minimal rundown for getting the mock scoring service online, feeding it data, and calling the APIs.
 
-## Table of Contents
+---
 
-- [Setup and Run](#setup-and-run)
-- [Project Structure](#project-structure)
-- [Competition Mode Overview](#competition-mode-overview)
-- [Admin Dashboard](#admin-dashboard)
-- [Real-time Leaderboard UI](#real-time-leaderboard-ui)
-- [Groundtruth CSV Format](#groundtruth-csv-format)
-- [Admin Controls](#admin-controls)
-- [API Request Format](#api-request-format)
-- [Scoring System](#scoring-system)
-- [Expose API](#expose-api-to-team)
-- [Detailed Documentation](docs/)
-
-## Setup and Run
-
-### 1. Installation
+## 1. Setup & Exposure
 
 ```bash
-# Create virtual environment
 python3 -m venv venv
-source venv/bin/activate  # macOS/Linux
-# venv\Scripts\activate   # Windows
-
-# Install dependencies
+source venv/bin/activate        # or venv\Scripts\activate on Windows
 pip install -r requirements.txt
-```
 
-### 2. Start Server
-
-```bash
+# Run FastAPI + auto-reload, expose to LAN on port 8000
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Server runs at: `http://localhost:8000`
+- `--host 0.0.0.0` allows any machine on the same network to call the service: `http://<your-LAN-ip>:8000`.
+- Ensure the OS firewall (or cloud security group) allows inbound TCP 8000.
+- Web apps once running:
+  - Leaderboard UI: `http://<host>:8000/leaderboard-ui`
+  - Admin dashboard: `http://<host>:8000/admin-dashboard`
+- Register every real team via API before submitting:
+  ```bash
+  curl -X POST http://<host>:8000/teams/register \
+    -H "Content-Type: application/json" \
+    -d '{"team_name": "Your Awesome Team"}'
+  # => keep the returned team_session_id secret
+  ```
 
-**Web Interfaces:**
-- 🎮 **Admin Dashboard:** `http://localhost:8000/admin-dashboard`
-- 📊 **Leaderboard UI:** `http://localhost:8000/leaderboard-ui`
+### UI preview
 
-### 3. Test
+Admin Dashboard             |  Leaderboard
+:--------------------------:|:--------------------------:
+![Admin Dashboard](assests/admin-dashboard.png) | ![Leaderboard](assests/leaderboard.png)
 
-```bash
-# Health check
-curl http://localhost:8000/
+---
 
-# View current config
-curl http://localhost:8000/config
+## 2. Data Configuration (`data/groundtruth.csv`)
+
+Header:
+```
+id,type,scene_id,video_id,points,answer
 ```
 
-## Project Structure
+| Field      | Description                                                                 |
+|------------|-----------------------------------------------------------------------------|
+| `id`       | Unique integer question ID.                                                 |
+| `type`     | One of `KIS`, `QA`, `TR`.                                                   |
+| `scene_id` | Scene identifier; must match submissions.                                   |
+| `video_id` | Video identifier; must match submissions.                                   |
+| `points`   | Comma‑separated integers; every pair `[start,end]` = one event (must be sorted and have even length). |
+| `answer`   | (Optional, QA only) canonical uppercase answer string.                      |
 
-The project uses a **modular architecture** with clear separation of concerns:
-
+Example rows:
 ```
-app/
-├── main.py                    # FastAPI entry point (~100 lines)
-├── state.py                   # Global state (GT_TABLE)
-├── models.py                  # Pydantic data models
-├── utils.py                   # Utility functions
-│
-├── api/                       # API Layer - FastAPI routers
-│   ├── health.py             # Health check endpoint
-│   ├── admin.py              # Admin management (start/stop/reset)
-│   ├── submission.py         # Submit answers + list questions
-│   ├── leaderboard.py        # Leaderboard data + UI serving
-│   └── config.py             # Configuration endpoint
-│
-├── core/                      # Core Business Logic
-│   ├── groundtruth.py        # Load ground truth data
-│   ├── normalizer.py         # Normalize submissions (KIS/QA/TR)
-│   ├── scoring.py            # Score calculation with tolerance
-│   └── session.py            # Question session management
-│
-├── services/                  # Support Services
-│   ├── fake_teams.py         # Generate fake team data
-│   └── leaderboard.py        # Assemble leaderboard data
-│
-└── deprecated/                # Legacy Code
-    └── config.py             # Old config loader (to be phased out)
+1,KIS,K14,V026,"370000,386000",
+9,QA,K17,V003,"340000,380000",MOCCHAU
+11,TR,K02,V005,"9925,9975,10000,10050,10125,10175",
 ```
 
-**Design Principles:**
-- **Layered Architecture:** API → Core → Services
-- **Single Responsibility:** Each module has one clear purpose
-- **Dependency Injection:** Shared state via `app.state` module
-- **Testability:** Business logic separated from API routes
-- **Scalability:** Easy to add new endpoints or features
+Update the CSV and restart the server (or hot-reload) to load new questions.
 
-**Import Pattern:**
-```python
-from app import state                    # Global state
-from app.core.scoring import score_submission
-from app.core.session import start_question
-from app.services.fake_teams import generate_fake_teams
-```
+---
 
-## Competition Mode Overview
+## 3. Core APIs
 
-**Server-Controlled Timing:** Admin starts questions, teams submit within time limits.
+Base URL examples:
+- Local machine: `http://localhost:8000`
+- Same LAN: `http://192.168.x.x:8000` (replace with your IP)
 
-**Key Features:**
-- ⏱️ **Time-based scoring:** Earlier submissions get higher scores
-- 🚫 **Penalty system:** Wrong submissions reduce final score
-- ✅ **Exact match:** No tolerance, must match groundtruth exactly
-- 🏆 **Leaderboard:** Real-time rankings by score and time
-- 🔒 **One completion per team:** Can't submit after correct answer
-- 🎯 **Real-time UI:** Live leaderboard with submission tracking
+### Admin lifecycle
+| Endpoint | Method | Body | Description |
+|----------|--------|------|-------------|
+| `/admin/start-question` | POST | `{"question_id": 1, "time_limit": 300, "buffer_time": 10}` | Start a question session. |
+| `/admin/stop-question`  | POST | `{"question_id": 1}`                                       | Stop accepting submissions for that question. |
+| `/admin/sessions`       | GET  | –                                                          | Inspect all sessions (status, timers, stats). |
+| `/admin/reset`          | POST | –                                                          | Clear every session (testing only). |
 
-**Workflow:**
-1. **Admin opens dashboard** at `/admin-dashboard`
-2. **Starts question** via web UI (auto-loads time settings from CSV)
-3. **Teams submit answers** through API (all mapped to "0THING2LOSE")
-4. **System calculates score** based on time and penalties
-5. **Leaderboard updates** automatically with real + fake teams
-6. **Admin stops question** when time expires or manually
+### Public information
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/`                 | GET | Health check. |
+| `/config`           | GET | Current active question, scoring params, question list. |
+| `/api/leaderboard-data` | GET | JSON payload used by the leaderboard UI. |
+| `/leaderboard-ui`       | GET | Static leaderboard page. |
+| `/admin-dashboard`      | GET | Static admin control panel. |
 
-## Admin Dashboard
+### Team management
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/teams/register` | POST | Register a team name, receive `team_session_id` for future submissions. |
 
-**Access at:** `http://localhost:8000/admin-dashboard`
+### Submission API
+- Endpoint: `POST /submit`
+- Body must include `teamSessionId` obtained from `/teams/register` plus `answerSets` data.
 
-**Features:**
-- 📊 **Status Panel:** Real-time view of active question, teams submitted/completed, countdown timer
-- 🎮 **Question Control:** Start/stop questions with auto-configuration from CSV
-- ⚡ **Quick Actions:** One-click buttons to start Q1-Q5, reset competition
-- 📋 **Session History:** Table showing all past question sessions with duration and team stats
-- 📝 **Activity Log:** Live feed of submissions and system events
-- ⏱️ **Smooth Countdown:** Updates every second for precise time tracking
-
-**Auto-Configuration:**
-- Just enter **Question ID** (e.g., "Q1")
-- System automatically loads:
-  - ⏱️ **Time Limit:** Default 300 seconds (5 minutes) from CSV
-  - 🔄 **Buffer Time:** Default 10 seconds grace period
-  - � **Max Points:** From groundtruth data
-- No manual time input needed!
-
-**Color Scheme:**
-- 🟢 **Green:** Active/Success states
-- 🔴 **Red:** Inactive/Error states
-- ⚫ **Black:** Background (dark theme)
-- ⚪ **White:** Text and labels
-
-**API Endpoints:**
-- `GET /api/competition/status` - Current question status and countdown
-- `POST /api/competition/start` - Start question (auto-fetch config)
-- `POST /api/competition/stop` - Stop active question
-- `GET /config` - All questions with time settings
-
-## Real-time Leaderboard UI
-
-**Access at:** `http://localhost:8000/leaderboard-ui`
-
-**Dual-View System:**
-
-### 1️⃣ Real-time Tab (Grid View)
-- 🎯 **Active Question Only:** Shows current question being played
-- 🟩 **Grid Layout:** Each team in a card (responsive 4-column grid)
-- 🎨 **3-Color Theme:** Black background, green (correct), red (wrong), white text
-- ⭐ **0THING2LOSE Highlight:** Your team always appears top-left
-- 📊 **Live Stats:** Score, submission count (✓/✗), submission time
-- 🔄 **Auto-refresh:** Every 2 seconds
-
-**Grid Card Layout:**
-```
-┌─────────────────────┐  ┌─────────────────────┐
-│ ⭐ 0THING2LOSE      │  │ CodeNinja           │
-│ 85.5 pts           │  │ 92.0 pts           │
-│ ✓✓ | ✗ (3 subs)    │  │ ✓ (1 sub)          │
-│ ⏱️ 2m 15s          │  │ ⏱️ 1m 30s          │
-└─────────────────────┘  └─────────────────────┘
-```
-
-### 2️⃣ Overall Tab (Table View)
-- 📊 **All Questions:** Complete competition overview
-- 🏆 **Rankings:** Sorted by total score
-- ✅ **Submission Icons:** Green ✓ for correct, red ✗ for wrong
-- 📈 **Question Breakdown:** Individual scores for each question
-- 🤖 **20 Real Teams:** All AIC 2025 competitors (UIT@Dzeus, TKU.TonNGoYsss, UTE AI LAB, etc.)
-
-**Table Layout:**
-```
-┌──────┬────────────┬─────────────┬─────────────┬────────┐
-│ Rank │ Team       │ Q1          │ Q2          │ Total  │
-├──────┼────────────┼─────────────┼─────────────┼────────┤
-│  🥇  │ ⭐ 0THIN.. │ ✅✅ | ❌   │ ✅          │  175.5 │
-│      │            │   85.5      │   90.0      │        │
-├──────┼────────────┼─────────────┼─────────────┼────────┤
-│  🥈  │ CodeNinja  │ ✅          │ ✅✅        │  168.3 │
-│      │            │   92.0      │   76.3      │        │
-└──────┴────────────┴─────────────┴─────────────┴────────┘
-```
-
-**API Endpoint:**
-- `GET /api/leaderboard-data` - JSON data for all questions and teams
-
-## Groundtruth CSV Format
-
-File `data/groundtruth.csv`:
-
-```csv
-id,type,scene_id,video_id,points
-1,TR,L26,V017,"4890-5000-5001-5020"
-2,KIS,L26,V017,"4890-5000-5001-5020"
-3,QA,K01,V021,"12000-12345"
-```
-
-**Rules:**
-- `points`: Dash-separated integers (`-`), **count must be even**
-- Each pair of numbers = 1 event: `[start, end]`
-- KIS/QA: points = milliseconds (ms)
-- TR: points = frame_id
-- Points must be sorted in **ascending order**
-
-**Example:**
-- `4890-5000-5001-5020` → 2 events: [4890,5000] and [5001,5020]
-
-## Admin Controls
-
-Control competition through **Web Dashboard** or **API endpoints**.
-
-### Method 1: Admin Dashboard (Recommended)
-
-**Access:** `http://localhost:8000/admin-dashboard`
-
-**Quick Start:**
-1. Enter Question ID (e.g., "Q1")
-2. View auto-detected time settings
-3. Click "Start Question"
-4. Monitor countdown and submissions
-5. Click "Stop Question" when done
-
-**Or use Quick Actions for Q1-Q5 with one click!**
-
-### Method 2: API Endpoints
-
-#### Start Question
-
-```bash
-curl -X POST http://localhost:8000/admin/start-question \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question_id": 1,
-    "time_limit": 300,
-    "buffer_time": 10
-  }'
-```
-
-**Response:**
+#### KIS body
 ```json
 {
-  "success": true,
-  "question_id": 1,
-  "start_time": 1762492824.777456,
-  "time_limit": 300,
-  "buffer_time": 10,
-  "message": "Question 1 started. Teams can now submit."
-}
-```
-
-#### Stop Question
-
-```bash
-curl -X POST http://localhost:8000/admin/stop-question \
-  -H "Content-Type: application/json" \
-  -d '{"question_id": 1}'
-```
-
-#### Get Competition Status
-
-```bash
-curl http://localhost:8000/api/competition/status
-```
-
-**Response:**
-```json
-{
-  "is_active": true,
-  "active_question_id": 1,
-  "remaining_time": 287.5,
-  "teams_submitted": 1,
-  "teams_completed": 1
-}
-```
-
-#### Reset All Sessions (Testing Only)
-
-```bash
-curl -X POST http://localhost:8000/admin/reset-all
-```
-
-#### List Active Sessions
-
-```bash
-curl http://localhost:8000/admin/sessions
-```
-
-### Check Question Status
-
-```bash
-curl http://localhost:8000/question/1/status
-```
-
-**Response:**
-```json
-{
-  "question_id": 1,
-  "is_active": true,
-  "elapsed_time": 29.36,
-  "remaining_time": 270.64,
-  "time_limit": 300,
-  "buffer_time": 10,
-  "total_teams_submitted": 2,
-  "completed_teams": 2
-}
-```
-
-### View Leaderboard
-
-```bash
-curl http://localhost:8000/leaderboard?question_id=1
-```
-
-**Response:**
-```json
-{
-  "question_id": 1,
-  "total_ranked": 2,
-  "rankings": [
-    {
-      "rank": 1,
-      "team_id": "team_02",
-      "score": 95.5,
-      "submit_time": 5.23,
-      "wrong_attempts": 0
-    },
-    {
-      "rank": 2,
-      "team_id": "team_01",
-      "score": 85.5,
-      "submit_time": 12.45,
-      "wrong_attempts": 1
-    }
-  ]
-}
-```
-
-## API Request Format
-
-**Server auto-handles `team_id` and `question_id`**:
-- ✅ `team_id`: Automatically mapped to "0THING2LOSE" (your team)
-- ✅ `question_id`: Automatically uses the active question started by admin
-- ⚠️ Only submit when admin has started a question!
-
-**You only need to send `answerSets`** - the actual answer data.
-
-**IMPORTANT**: All submissions must include **SCENE_ID** and **VIDEO_ID** in format: `<SCENE_ID>_<VIDEO_ID>`
-
-### KIS (Known-Item Search)
-
-Each event = separate answer. Must match **ALL** groundtruth events exactly (100% or 0 score).
-
-**Format**: `mediaItemName` = `<SCENE_ID>_<VIDEO_ID>`
-
-```json
-{
+  "teamSessionId": "<session-id>",
   "answerSets": [{
     "answers": [
-      {
-        "mediaItemName": "L26_V017",
-        "start": "4945",
-        "end": "4945"
-      },
-      {
-        "mediaItemName": "L26_V017",
-        "start": "5010",
-        "end": "5010"
-      }
+      { "mediaItemName": "L26_V017", "start": "4999", "end": "4999" },
+      { "mediaItemName": "L26_V017", "start": "5049", "end": "5049" }
     ]
   }]
 }
 ```
 
-### QA (Query Answer)
-
-All times in **one text**, comma-separated. Must match **ALL** groundtruth events exactly (100% or 0 score).
-
-**Format:** `QA-<ANSWER>-<SCENE_ID>_<VIDEO_ID>-<MS1>,<MS2>,...`
-
+#### QA body
 ```json
 {
+  "teamSessionId": "<session-id>",
   "answerSets": [{
     "answers": [
-      { "text": "QA-MyAnswer-K17_V003-357500,362500" }
+      { "text": "QA-MOCCHAU-L17_V003-357500,362500" }
     ]
   }]
 }
 ```
 
-### TR (Temporal Retrieval / TRAKE)
-
-All frame IDs in **one text**, comma-separated. Supports **partial scoring**:
-- **100% match:** Full score (correctness = 1.0)
-- **50-99% match:** Half score (correctness = 0.5)
-- **<50% match:** Zero score (correctness = 0.0)
-
-**Format:** `TR-<SCENE_ID>_<VIDEO_ID>-<FRAME_ID1>,<FRAME_ID2>,...`
-
+#### TR body
 ```json
 {
+  "teamSessionId": "<session-id>",
   "answerSets": [{
     "answers": [
-      { "text": "TR-K02_V005-9925,9975,10000,10050,10125,10175" }
+      { "text": "TR-L26_V017-499,549,600" }
     ]
   }]
 }
 ```
 
-### Submit via API
+Rules of thumb:
+- `mediaItemName` **must** be `<SCENE_ID>_<VIDEO_ID>` exactly as in CSV.
+- For QA, the `ANSWER` segment must match the `answer` column verbatim (case- and accent-sensitive).
+- Send complete start/end pairs for every event; partial coverage will be graded according to the tolerance logic.
 
-```bash
-# KIS example
-curl -X POST http://localhost:8000/submit \
-  -H "Content-Type: application/json" \
-  -d '{
-    "answerSets": [{
-      "answers": [
-        {"mediaItemName": "L26_V017", "start": "4945", "end": "4945"},
-        {"mediaItemName": "L26_V017", "start": "5010", "end": "5010"}
-      ]
-    }]
-  }'
+---
 
-# QA example
-curl -X POST http://localhost:8000/submit \
-  -H "Content-Type: application/json" \
-  -d '{
-    "answerSets": [{
-      "answers": [{"text": "QA-MyAnswer-K17_V003-357500,362500"}]
-    }]
-  }'
-
-# TR example
-curl -X POST http://localhost:8000/submit \
-  -H "Content-Type: application/json" \
-  -d '{
-    "answerSets": [{
-      "answers": [{"text": "TR-K02_V005-9925,9975,10000,10050"}]
-    }]
-  }'
-```
-
-**Success Response (Correct):**
-```json
-{
-  "success": true,
-  "correctness": "full",
-  "score": 85.5,
-  "detail": {
-    "matched_events": 2,
-    "total_events": 2,
-    "wrong_attempts": 1,
-    "elapsed_time": 12.45,
-    "time_factor": 0.9585
-  }
-}
-```
-
-**Failure Response (Incorrect):**
-```json
-{
-  "success": false,
-  "correctness": "incorrect",
-  "score": 0,
-  "detail": {
-    "matched_events": 1,
-    "total_events": 2,
-    "wrong_attempts": 2,
-    "message": "Wrong answer. Try again with penalty."
-  }
-}
-```
-
-**Already Completed:**
-```json
-{
-  "success": false,
-  "error": "already_completed",
-  "detail": {
-    "score": 95.5,
-    "completed_at": 5.23
-  },
-  "message": "You already completed this question with score 95.5"
-}
-```
-
-## Scoring System
-
-### Tolerance and Distance-Based Scoring
-
-**NEW**: System uses tolerance-based matching with distance penalty:
-
-**Tolerance Values:**
-- **KIS/QA**: ±2500 ms (±2.5 seconds) from event center
-- **TR**: ±12 frames from event center
-
-**Score Decay:**
-- **At event center**: 100% score
-- **Within tolerance**: Linear decay (100% → 50%)
-- **At tolerance boundary**: 50% score
-- **Outside tolerance**: 0% score
-
-**Example (TR)**:
-```
-Groundtruth: [10000, 10050]
-Event center: 10025
-Half range: 25 frames
-Max distance: 25 + 12 = 37 frames
-
-User submits:
-- 10025 → distance=0  → 100% quality
-- 10037 → distance=12 → ~84% quality
-- 10050 → distance=25 → ~66% quality
-- 10062 → distance=37 → 50% quality (at boundary)
-- 10063 → distance=38 → 0% (outside tolerance)
-```
-
-### Formula
-
-```
-Score = max(0, P_base + (P_max - P_base) × fT(t) - k × P_penalty) × correctness_factor × match_quality
-```
-
-Where:
-- **fT(t)** = Time factor = `1 - (t_submit / T_task)`
-- **match_quality** = Average match quality (0.5 to 1.0 based on distance from event centers)
-- **P_max** = Maximum score = 100
-- **P_base** = Base score = 50
-- **P_penalty** = Penalty per wrong submission = 10
-- **k** = Number of wrong submissions before correct answer
-- **T_task** = Time limit (default 300s)
-- **t_submit** = Time elapsed when submitting correct answer
-
-### Correctness Factor
-
-**Match Quality Adjustment:**
-All scores are multiplied by `match_quality` (0.5-1.0) based on distance from event centers.
-
-**KIS / QA:**
-- Must match **ALL events** (100%)
-- Final factor = `match_quality` (affected by tolerance)
-- Missing any event → 0 score
-
-**TR (TRAKE):**
-- 100% events matched: `factor = match_quality × 1.0`
-- 50-99% events matched: `factor = match_quality × 0.5`
-- <50% events matched: `factor = 0.0`
-
-### Example Calculation
-
-**Scenario:** Team submits correct answer after 30s with 1 wrong attempt
-
-```
-fT(30) = 1 - (30 / 300) = 0.9
-Score = max(0, 50 + (100 - 50) × 0.9 - 1 × 10) × 1.0
-      = max(0, 50 + 45 - 10) × 1.0
-      = 85.0
-```
-
-### Leaderboard Ranking
-
-Teams are ranked by:
-1. **Score** (descending)
-2. **Time** (ascending) - for tiebreakers
-
-## Expose API to Team
-
-### Within LAN
-
-```bash
-# Get your machine's IP
-ipconfig getifaddr en0  # macOS
-# ifconfig              # Linux
-# ipconfig              # Windows
-
-# Start server
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-Team members access: `http://<YOUR_IP>:8000/submit`
-
-### Docker
-
-```bash
-docker build -t scoring-server .
-docker run -p 8000:8000 scoring-server
-```
-
-### Production with Nginx
-
-```nginx
-server {
-    listen 80;
-    
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
-
-## Documentation
-
-Detailed documentation about system design, scoring logic, and architecture:
-
-- **[System Design](docs/system-design.md)** - Architecture, components, data flow
-- **[Scoring Logic](docs/scoring-logic.md)** - Detailed scoring algorithm with tolerance
-
-### Architecture Highlights
-
-**Modular Design:**
-- **5 API Routers** in `app/api/` - Clean separation of endpoints
-- **4 Core Modules** in `app/core/` - Business logic (scoring, normalization, session, groundtruth)
-- **2 Services** in `app/services/` - Support utilities (fake teams, leaderboard assembly)
-- **Global State** via `app.state.GT_TABLE` - Shared ground truth access
-
-**Key Features:**
-- ✅ Tolerance-based scoring (±2500ms for KIS/QA, ±12 frames for TR)
-- ✅ Distance-based match quality (linear decay from center to boundary)
-- ✅ Real team names (20 AIC 2025 teams)
-- ✅ Server auto-handles team_id and question_id
-- ✅ Admin web dashboard with countdown timer
-- ✅ Real-time leaderboard with grid + table views
-- ✅ QA answer validation (uppercase, no accents, no spaces)
-
-## Testing
-
-```bash
-# Run all tests
-pytest tests/ -v
-
-# Run specific test file
-pytest tests/test_scoring.py -v
-
-# Run with coverage
-pytest tests/ --cov=app --cov-report=html
-```
-
+## 4. Reference
+- [Scoring logic](docs/scoring-logic.md)
+- [System design](docs/system-design.md)

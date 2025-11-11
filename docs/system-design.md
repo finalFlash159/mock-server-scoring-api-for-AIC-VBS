@@ -19,7 +19,7 @@ graph TB
     AdminR -->|Manage| Session[Session Manager]
     Submit -->|Normalize| Normalizer[Normalizer]
     Submit -->|Score| Scorer[Scorer]
-    LB -->|Assemble| LBService[Leaderboard Service]
+    LB -->|Aggregate| Session
     
     Session -->|Generate| Fake[Fake Teams]
     Normalizer -->|Parse| NS[NormalizedSubmission]
@@ -28,13 +28,14 @@ graph TB
     
     Session -->|Track| State[Global State]
     State -->|GT_TABLE| GT[Ground Truth]
+    State -->|Scoring Params| Scorer
     GT -->|Load from| CSV[groundtruth.csv]
     
-    Config[current_task.yaml] -->|Parameters| Scorer
     Scorer -->|Results| Response[JSON Response]
     Response -->|HTTP| Team
+    Response -->|Feeds| Session
+    Response -->|Feeds| LB
     
-    LBService -->|Real + Fake| LB
     LB -->|JSON| UI
     
     style API fill:#4CAF50
@@ -52,7 +53,7 @@ graph TB
 - **Session management:** Tracks real + fake teams
 - **Tolerance-based scoring:** Distance-weighted match quality
 - **Real-time leaderboard:** Grid + table views with 20 real teams
-- **Auto team mapping:** All submissions → "0THING2LOSE"
+- **Team registration:** Each real team registers to obtain a `team_session_id` token for submissions.
 
 ## Project Structure
 
@@ -80,12 +81,7 @@ app/
 │
 ├── services/                  # Support Services
 │   ├── __init__.py
-│   ├── fake_teams.py         # Generate 19 fake teams
-│   └── leaderboard.py        # Assemble leaderboard data
-│
-└── deprecated/                # Legacy Code
-    ├── __init__.py
-    └── config.py             # Old YAML config loader
+│   └── fake_teams.py         # Generate fake leaderboard entries
 ```
 
 ## Component Architecture
@@ -295,7 +291,7 @@ REAL_TEAM_NAMES = [
     "TDTU_MindSet", "UTH_Phoenix", "VNU_Hanoi_AI"
 ]
 
-# Excludes "0THING2LOSE" (real team) from fake generation
+# Fake team pool used for leaderboard fillers
 # Total: 19 fake teams + 1 real team = 20 teams on leaderboard
 ```
 
@@ -524,14 +520,14 @@ flowchart TD
 sequenceDiagram
     participant C as Client
     participant API as FastAPI
-    participant CFG as Config Loader
+    participant SESS as Session Manager
     participant GT as GT Loader
     participant N as Normalizer
     participant S as Scorer
     
     C->>API: POST /submit
-    API->>CFG: Load config
-    CFG-->>API: Config object
+    API->>SESS: Get active session
+    SESS-->>API: Session + timers
     API->>GT: Get question GT
     GT-->>API: GroundTruth object
     API->>N: Normalize body
@@ -544,22 +540,12 @@ sequenceDiagram
     API-->>C: JSON response
 ```
 
-### Config Loading Strategy
+### Runtime Session Strategy
 
-```mermaid
-flowchart LR
-    A[Request Arrives] --> B[Load YAML]
-    B --> C[Parse Config]
-    C --> D[Get active_question_id]
-    D --> E[Fetch from GT_TABLE]
-    E --> F[Validate Match]
-    F --> G[Proceed to Score]
-```
-
-**Benefits:**
-- No server restart needed
-- Dynamic question switching
-- Easy testing
+- Admin endpoints create/update `QuestionSession` objects inside `app.core.session`.
+- `get_current_active_question_id()` resolves the latest active session (validated by timer).
+- Scoring parameters live in `app.state.SCORING_PARAMS`, so updates only require tweaking state (no YAML reload).
+- Because everything stays in memory, switching questions or resetting sessions takes effect instantly.
 
 ## File Structure
 
@@ -568,16 +554,25 @@ scoring-server/
 ├── app/
 │   ├── __init__.py           # Package marker
 │   ├── main.py               # FastAPI app, endpoints, CORS
+│   ├── state.py              # Global GT table + scoring params
 │   ├── models.py             # Pydantic data models
-│   ├── config.py             # YAML config loader
-│   ├── groundtruth_loader.py # CSV parser with validation
-│   ├── normalizer.py         # Body format normalizers (KIS/QA/TR)
-│   ├── scoring.py            # Core scoring algorithms
+│   ├── core/
+│   │   ├── groundtruth.py    # CSV parser with validation
+│   │   ├── normalizer.py     # Body format normalizers (KIS/QA/TR)
+│   │   ├── scoring.py        # Core scoring algorithms
+│   │   └── session.py        # Question/session management
+│   ├── api/
+│   │   ├── admin.py          # Admin controls
+│   │   ├── config.py         # Runtime config snapshot
+│   │   ├── leaderboard.py    # Leaderboard + UI routes
+│   │   ├── submission.py     # Submission endpoint
+│   │   └── health.py         # Health check
+│   ├── services/
+│   │   └── fake_teams.py     # Fake team generator
 │   └── utils.py              # Helper functions
-├── config/
-│   └── current_task.yaml     # Active question config
 ├── data/
 │   └── groundtruth.csv       # Question groundtruth data
+├── static/                   # Admin & leaderboard assets
 ├── tests/
 │   ├── __init__.py
 │   └── test_scoring.py       # Unit tests
@@ -719,28 +714,15 @@ gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker
 ## Performance Considerations
 
 - **CSV Loading:** Done once at startup, cached in memory
-- **Config Loading:** Per-request (lightweight YAML parse)
-- **Scoring:** O(n) where n = number of events
+- **Runtime Config:** Stored in-process via `app.state.SCORING_PARAMS` (no YAML I/O)
+- **Scoring:** O(n) where n = number of ground-truth events
 - **No Database:** All in-memory for speed
 
 ## Configuration Options
 
-### `config/current_task.yaml`
-
-```yaml
-active_question_id: 1      # Which question is active
-fps: 25.0                  # Video FPS for ms→frame conversion
-max_score: 100.0           # Maximum score per event
-frame_tolerance: 12.0      # Tolerance in frames (±from event boundaries)
-decay_per_frame: 1.0       # Score decay rate per frame
-aggregation: "mean"        # How to combine event scores: mean/min/sum
-```
-
-**Aggregation Strategies:**
-
-- `mean`: Average score across all events (default)
-- `min`: Take lowest score (strict, all events must be good)
-- `sum`: Sum all scores (rewards multiple correct events)
+- `app.state.SCORING_PARAMS` stores `p_max`, `p_base`, `p_penalty`, default `time_limit`, and `buffer_time`.
+- Admin API can override `time_limit`/`buffer_time` per question when calling `/admin/start-question`.
+- Updating scoring weights only requires tweaking the state (e.g., during application startup or via a maintenance endpoint).
 
 ## Real-time Leaderboard UI
 
@@ -766,7 +748,7 @@ static/
    - Medium (40-60): Amber/Yellow
    - Low (0-40): Red
 4. **Team highlighting:**
-   - "0THING2LOSE" = real team (purple gradient, ⭐ icon)
+   - Registered teams use solid accents; fake teams use muted tones.
    - All other teams = fake/simulated
 5. **Rankings:**
    - 🥇 Gold medal for 1st place
@@ -803,7 +785,7 @@ sequenceDiagram
   "questions": [1, 2, 3, 4, 5],
   "teams": [
     {
-      "team_name": "0THING2LOSE",
+     "team_name": "Example Team",
       "is_real": true,
       "questions": {
         "1": {

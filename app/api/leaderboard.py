@@ -6,7 +6,8 @@ from fastapi.responses import HTMLResponse
 import os
 
 from app import state
-from app.core.session import get_question_session, active_questions
+from app.core.session import get_question_session, get_current_active_question_id
+from app.services.team_registry import get_team_name
 
 
 router = APIRouter(tags=["leaderboard"])
@@ -41,9 +42,10 @@ async def get_leaderboard_data():
         
         for team_id, team_sub in all_teams.items():
             if team_id not in teams_data:
+                display_name = team_sub.team_name or get_team_name(team_id)
                 teams_data[team_id] = {
-                    "team_name": team_id,
-                    "is_real": (team_id == "0THING2LOSE"),
+                    "team_name": display_name or team_id,
+                    "is_real": bool(team_sub.team_session_id),
                     "questions": {},
                     "total_score": 0
                 }
@@ -69,13 +71,7 @@ async def get_leaderboard_data():
     for team in teams_list:
         team["total_score"] = round(team["total_score"], 1)
     
-    # Detect active question (most recent active session)
-    active_question_id = None
-    for q_id in sorted(active_questions.keys(), reverse=True):
-        session = active_questions.get(q_id)
-        if session and session.is_active:
-            active_question_id = q_id
-            break
+    active_question_id = get_current_active_question_id()
     
     return {
         "active_question_id": active_question_id,
